@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+.git/
+.env
+*.csv
+eval/__pycache__/
+tools/__pycache__/
+deploy/
+*.md
+test_embeddings.py
