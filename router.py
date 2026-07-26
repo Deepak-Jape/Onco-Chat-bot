@@ -665,8 +665,10 @@ implemented exactly as specified, in priority order.
 """
 import re
 
+from conversation import conversations
 from memory import SessionStore
 from tools.search_trials import search_trials
+from tools.search_cohorts import search_cohorts
 from tools.get_trial_detail import get_trial_detail
 from tools.get_endpoints_and_outcomes import get_endpoints_and_outcomes
 from tools.get_hazard_ratios import get_hazard_ratios
@@ -998,8 +1000,173 @@ def _general_knowledge_response(user_message):
     }
 
 
-def handle_turn(session_id: str, user_message: str) -> dict:
+def _cohort_list_response(user_message, classification, on_step=None):
+    """Cohort-level answer per the client's spec: 'N cohorts within M trials' + a
+    table (OncoSuite ID | Indication | Regimen | Phase | Status), clickable rows,
+    Key Insights, and Next Steps. Streams the client's 6 named steps. Returns a
+    response dict with response_mode='cohort_list', or None to fall through."""
+    def step(m):
+        if on_step:
+            on_step(m)
+
+    filters = dict(classification.get("filters", {}) or {})
+    filters.pop("nct_id", None)
+    _cohort_keys = ("drug_name_or_target", "condition", "biomarkers",
+                    "line_of_therapy", "phase", "study_status")
+    kwargs = {k: filters[k] for k in _cohort_keys if filters.get(k)}
+    # If the classifier gave no usable filters (it's an LLM call and is
+    # non-deterministic -- it sometimes labels "list all ADC cohorts" as
+    # aggregate_query with filters:{}), fall back to a DETERMINISTIC scan of the
+    # message for a known drug-class term. This guarantees "ADC cohorts" finds its
+    # ADC filter every time instead of falling through to the all-trials list.
+    if not kwargs.get("drug_name_or_target"):
+        from tools.search_cohorts import extract_drug_class
+        dc = extract_drug_class(user_message)
+        if dc:
+            kwargs["drug_name_or_target"] = dc
+    if not kwargs:
+        return None  # nothing to scope a cohort search on -> let normal cascade run
+
+    step("Creating table structure")
+    step("Pulling relevant data from the trials")
+    tr = search_cohorts(**kwargs)
+    step("Verifying source-data traceability")
+    if not tr.get("results"):
+        return None
+    step("Generating table")
+    from synthesis import synthesize_cohorts
+    synthesis = synthesize_cohorts(user_message, tr)
+    step("Generating key insights")
+
+    return {
+        "intent": "filtered_search", "tool_name": "search_cohorts",
+        "escalate": False, "response_mode": "cohort_list",
+        "tool_result": tr, "synthesis": synthesis,
+        "filters_extracted": True,
+    }
+
+
+PAGE_SIZE = 200  # rows returned per "show all" page
+
+_SHOW_ALL_CUES = ("show all", "show me all", "list all", "list every", "all the trials",
+                  "all trials", "every trial", "full list", "entire list", "show everything")
+_MORE_CUES = ("show more", "more trials", "next 200", "next page", "next batch",
+              "next set", "see more", "load more", "continue", "more results", "next")
+
+
+def _paginated_search_response(session_id, user_message, lm, classification,
+                               working_set, history, on_step=None):
+    """Handle "show all trials" and its "show more / next 200" follow-ups.
+
+    Returns a response dict (paginated page of trials) or None to let the normal
+    cascade handle the message. Uses search_trials' limit/offset + total_matches.
+    """
+    is_show_all = any(c in lm for c in _SHOW_ALL_CUES)
+    # A bare "next" is only a pagination request if we actually have a page open.
+    prev = working_set.get("pagination")
+    is_more = bool(prev) and any(c in lm for c in _MORE_CUES)
+    if not (is_show_all or is_more):
+        return None
+
+    filters = dict(classification.get("filters", {}) or {})
+    filters.pop("nct_id", None)
+
+    if is_more and prev:
+        # Continue the SAME search the previous page used; advance the offset.
+        filters = dict(prev.get("filters", {}))
+        offset = int(prev.get("next_offset", 0))
+    else:
+        offset = 0
+
+    if on_step:
+        on_step(f"Fetching trials {offset + 1}–{offset + PAGE_SIZE} from the database")
+    tool_result = search_trials(**{**filters, "limit": PAGE_SIZE, "offset": offset})
+    results = tool_result.get("results", [])
+    total = tool_result.get("total_matches", len(results))
+    shown_upto = offset + len(results)
+    if on_step:
+        on_step(f"Found {total} trials — building the table")
+
+    # Persist the cursor so a later "show more" continues from here.
+    ws = _sessions.get(session_id)
+    if shown_upto < total:
+        ws["pagination"] = {"filters": filters, "next_offset": shown_upto, "total": total}
+    else:
+        ws.pop("pagination", None)          # exhausted -> clear so "next" stops paging
+    _sessions.set(session_id, ws)
+    _sessions.update_after_tool_call(session_id, "search_trials", tool_result)
+
+    synthesis = _render_trial_page(results, offset, shown_upto, total, filters)
+    _record_answer(session_id, synthesis)
+    return {
+        "intent": "filtered_search", "tool_name": "search_trials",
+        "escalate": False, "response_mode": "paginated_list",
+        "tool_result": tool_result, "synthesis": synthesis,
+        "filters_extracted": bool(filters),
+        "pagination": {"offset": offset, "shown_upto": shown_upto, "total": total,
+                       "has_more": shown_upto < total},
+    }
+
+
+def _render_trial_page(results, offset, shown_upto, total, filters):
+    """Deterministic tabular render of one page of trials + a next-page offer.
+    No LLM needed: every value is copied straight from the tool result."""
+    if not results:
+        return {"text": "**No trials matched.**\nThere are no trials for these filters.",
+                "mode": "deterministic", "table_data": []}
+
+    scope = " (filtered)" if filters else ""
+    header = (f"**Trials{scope}: showing {offset + 1}–{shown_upto} of {total}**")
+    lines = [header, "",
+             "| # | NCT ID | Trial | Phase | Status | Sponsor | Enrollment |",
+             "|---|---|---|---|---|---|---|"]
+    for i, r in enumerate(results, start=offset + 1):
+        title = (r.get("title") or "")[:80]
+        lines.append(
+            f"| {i} | {r.get('nct_id') or '—'} | {title} | {r.get('phase') or '—'} "
+            f"| {r.get('status') or '—'} | {r.get('sponsor') or '—'} | {r.get('enrollment') or '—'} |"
+        )
+    lines.append("")
+    remaining = total - shown_upto
+    if remaining > 0:
+        nxt = min(PAGE_SIZE, remaining)
+        lines.append(f"_Showing {shown_upto} of {total}. Want to explore more? "
+                     f"Say **\"show more\"** for the next {nxt} trials._")
+    else:
+        lines.append(f"_That's all {total} trials._")
+    return {"text": "\n".join(lines), "mode": "deterministic", "table_data": results}
+
+
+def _record_answer(session_id, synthesis):
+    """Store the assistant's answer text in the transcript so the NEXT turn's
+    synthesize() call can see it for follow-up / cross-questioning."""
+    if isinstance(synthesis, dict):
+        text = synthesis.get("text")
+        if text:
+            conversations.add_assistant(session_id, text)
+
+
+def handle_turn(session_id: str, user_message: str, on_step=None) -> dict:
+    """on_step: optional callback(str) invoked with a human-readable status at each
+    real stage (classify -> route -> query -> synthesize). Used by the SSE endpoint
+    to STREAM the actual background steps to the UI, like Claude does. Default None
+    keeps the plain blocking behaviour for /ask and the eval harness."""
+    def _step(msg):
+        if on_step:
+            try:
+                on_step(msg)
+            except Exception:
+                pass  # a broken client stream must never break answering
+
     working_set = _sessions.get(session_id)
+
+    # Conversation transcript for follow-up / cross-questioning. Snapshot the
+    # history BEFORE this turn (so synthesize sees prior turns, not the current
+    # question echoed back), then record this user turn. The produced answer is
+    # recorded at the end so the next turn can refer to it.
+    _history = conversations.history(session_id)
+    conversations.add_user(session_id, user_message)
+    _step("Understanding your question")
 
     # EXPLICIT TRIAL ID OVERRIDE (runs before classification/RAG/landscape): a pasted
     # NCT number OR an internal oncosuite id (3-3-3 alphanumeric, e.g. "00v-vw5-Ejz")
@@ -1008,6 +1175,7 @@ def handle_turn(session_id: str, user_message: str) -> dict:
     _nct = re.search(r"nct\d{8}", user_message, re.IGNORECASE)
     _onco = re.search(r"\b([0-9A-Za-z]{3}-[0-9A-Za-z]{3}-[0-9A-Za-z]{3})\b", user_message)
     if _nct or _onco:
+        _step("Detected a trial ID — looking it up directly")
         _cls = {"intent": "single_trial_lookup",
                 "filters": ({"nct_id": _nct.group(0).upper()} if _nct
                             else {"oncosuite_id": _onco.group(1)})}
@@ -1015,8 +1183,11 @@ def handle_turn(session_id: str, user_message: str) -> dict:
         if not (isinstance(tool_result, dict) and tool_result.get("error")
                 and not tool_result.get("oncosuite_id")):
             _sessions.update_after_tool_call(session_id, tool_name, tool_result)
+            _step("Found the trial — writing the answer")
             from synthesis import synthesize
-            synthesis = synthesize(user_message, "single_trial_lookup", tool_name, tool_result)
+            synthesis = synthesize(user_message, "single_trial_lookup", tool_name,
+                                   tool_result, history=_history)
+            _record_answer(session_id, synthesis)
             return {"intent": "single_trial_lookup", "tool_name": tool_name,
                     "escalate": True, "response_mode": "strong_model_synthesis",
                     "tool_result": tool_result, "synthesis": synthesis}
@@ -1027,6 +1198,7 @@ def handle_turn(session_id: str, user_message: str) -> dict:
 
     classification = classify_and_extract(user_message, working_set)
     intent = classification["intent"]
+    _step(f"Classified as: {intent.replace('_', ' ')}")
 
     # GUARDRAIL: honor sponsor exclusions ("not interested in academia"). Inject the
     # exclusion into the filters so it flows into search_trials/landscape via dispatch.
@@ -1035,6 +1207,39 @@ def handle_turn(session_id: str, user_message: str) -> dict:
         classification.setdefault("filters", {})["exclude_sponsor_type"] = _excl
 
     _lm = user_message.lower()
+
+    # COHORT-LEVEL view (per the client's spec drawing): when the user asks for
+    # cohorts, or for a trial list "including their endpoints" / a breakdown, answer
+    # at the COHORT grain -- one row per cohort with Indication | Regimen | Phase |
+    # Status and a "N cohorts within M trials" count line -- instead of the plain
+    # trial list. Only fires when cohorts/endpoints are IMPLIED so a bare
+    # "show me ADC trials" keeps the existing trial list. Runs BEFORE the show-all
+    # pagination gate so "list all ADC cohorts" isn't grabbed as a trial page.
+    _COHORT_CUES = ("cohort", "cohorts", "including their endpoint", "with endpoint",
+                    "and their endpoint", "endpoints", "by indication", "regimen")
+    # Fire on cohort cues regardless of the exact classified intent -- "list all
+    # ADC cohorts" can land as filtered_search OR aggregate_query depending on LLM
+    # nondeterminism; both should give the cohort table. Excludes only clearly
+    # unrelated intents (single-trial, arm comparison). _cohort_list_response
+    # returns None if it can't extract usable filters, so we fall through safely.
+    if any(c in _lm for c in _COHORT_CUES) and intent not in (
+            "single_trial_lookup", "arm_comparison"):
+        _co = _cohort_list_response(user_message, classification, _step)
+        if _co is not None:
+            _record_answer(session_id, _co.get("synthesis"))
+            return _co
+
+    # SHOW-ALL / PAGINATION. "show me all the trials", "list every trial", and the
+    # follow-ups "show more" / "next 200" return a large PAGE (PAGE_SIZE rows) with
+    # the true total stated and an explicit offer to fetch the next page. We page
+    # through with an offset cursor stored on the session, keyed to the active
+    # filter set so "next 200" continues the SAME search. This runs before the
+    # aggregate/RAG gates so a bare "show all trials" isn't grabbed as a no-filter
+    # question and dropped to SQL/RAG.
+    _pg = _paginated_search_response(session_id, user_message, _lm, classification,
+                                     working_set, _history, _step)
+    if _pg is not None:
+        return _pg
 
     # LANDSCAPE / PORTFOLIO questions -> get_competitive_landscape (the tool that
     # produces the drug + phase breakdown CHARTS). This must run BEFORE the conceptual
@@ -1051,6 +1256,7 @@ def handle_turn(session_id: str, user_message: str) -> dict:
     )
     _is_landscape = any(c in _lm for c in _LANDSCAPE_CUES) and not re.search(r"nct\d{8}", _lm)
     if _is_landscape and intent not in ("single_trial_lookup", "arm_comparison"):
+        _step("Building the competitive landscape (drug × phase breakdown)")
         filters = classification.get("filters", {}) or {}
         # infer condition from the message if the classifier didn't extract one
         cond = filters.get("condition")
@@ -1067,7 +1273,8 @@ def handle_turn(session_id: str, user_message: str) -> dict:
         if ls and ls.get("groups"):
             from synthesis import synthesize
             synthesis = synthesize(user_message, "landscape_or_trend",
-                                   "get_competitive_landscape", ls)
+                                   "get_competitive_landscape", ls, history=_history)
+            _record_answer(session_id, synthesis)
             return {"intent": "landscape_or_trend", "tool_name": "get_competitive_landscape",
                     "escalate": True, "response_mode": "strong_model_synthesis",
                     "tool_result": ls, "synthesis": synthesis,
@@ -1168,8 +1375,11 @@ def handle_turn(session_id: str, user_message: str) -> dict:
             "note": "Doc 05 flags this as a product decision, not resolved here.",
         }
 
+    _step("Searching the trial database")
     tool_name, tool_result = _dispatch_tool(classification, working_set)
     unmatched_terms = tool_result.get("unmatched_terms", []) if isinstance(tool_result, dict) else []
+    if isinstance(tool_result, dict) and "total_matches" in tool_result:
+        _step(f"Found {tool_result['total_matches']} matching trial(s)")
 
     # Route to text-to-SQL when the fixed search tool can't actually answer the question:
     #  (a) it extracted NO real filters (classifier didn't understand it), or
@@ -1190,12 +1400,14 @@ def handle_turn(session_id: str, user_message: str) -> dict:
     if intent == "filtered_search" and (
         not any(v for v in _filters.values()) or _wants_aggregate
     ):
+        _step("Translating your question into a database query")
         ts = _text_to_sql_response(user_message)
         if ts is not None:
             return ts
         # SQL declined a no-filter / conceptual question -> try semantic/RAG search
         # over the embedded trials before giving up on the structured search result.
         if not _wants_aggregate:  # aggregates need SQL math, not snippet retrieval
+            _step("Running a semantic search over the trials")
             vs = _vector_search_response(user_message)
             if vs is not None:
                 return vs
@@ -1218,8 +1430,11 @@ def handle_turn(session_id: str, user_message: str) -> dict:
         # text_to_sql.py's LLM-written SQL path is a completely separate branch in
         # hybrid.py and never reaches this line -- see synthesis.py's module
         # docstring for the enforced invariant.
+        _step("Writing the answer")
         from synthesis import synthesize
-        synthesis = synthesize(user_message, intent, tool_name, tool_result)
+        synthesis = synthesize(user_message, intent, tool_name, tool_result,
+                               history=_history)
+        _record_answer(session_id, synthesis)
 
     return {
         "intent": intent, "tool_name": tool_name, "tool_result": tool_result,

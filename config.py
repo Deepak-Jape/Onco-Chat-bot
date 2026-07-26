@@ -45,7 +45,13 @@ DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
 
 # ---- behaviour ----
 SQL_ROW_LIMIT = 200            # hard cap appended to generated SQL
-LLM_TIMEOUT_SECONDS = 300      # local CPU models are slow; be patient (7B on CPU can take minutes)
+# LLM call timeout. Local Ollama CPU models genuinely need minutes, but the hosted
+# APIs (DeepSeek/Claude) respond in seconds -- a 300s timeout there just means a
+# single network blip hangs the whole request (and the UI spins) for 5 minutes.
+# So: generous for ollama, tight for the API backends. Override with ONCOSUITE_LLM_TIMEOUT.
+LLM_TIMEOUT_SECONDS = int(os.environ.get(
+    "ONCOSUITE_LLM_TIMEOUT",
+    "300" if LLM_BACKEND == "ollama" else "60"))
 MAX_HISTORY_TURNS = 12         # conversation turns kept as context
 VECTOR_TOP_K = 5               # semantic-search fallback results
 

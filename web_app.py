@@ -3186,7 +3186,9 @@ import datetime
 import html
 import json
 import os
+import queue
 import re
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
@@ -4164,6 +4166,74 @@ def render_markdown_lite(md: str) -> str:
     return "\n".join(out)
 
 
+def render_cohort_list(syn: dict) -> str:
+    """Interactive cohort table per the client's spec: a 'N cohorts within M
+    trials' lead line, a scrollable table whose rows are CLICKABLE (each fires a
+    follow-up query for that trial's executive summary), a CSV download button,
+    Key Insights, and Next Steps. Built as first-class HTML (not markdown-lite)
+    so rows can carry click handlers and the table can scroll + download."""
+    if not syn or not syn.get("rows"):
+        return ('<div class="card"><p>No cohorts matched this query.</p></div>')
+
+    rows = syn["rows"]
+    lead = render_markdown_lite(syn.get("lead", ""))
+
+    # Rows: each is clickable. data-q holds the follow-up question the front-end
+    # sends on click (asks for that specific trial's executive summary). The id
+    # shown is the public NCT id when available, else the internal OncoSuite id.
+    body = []
+    for r in rows:
+        ident = r.get("nct_id") or r.get("oncosuite_id") or ""
+        follow = f"Give me the executive summary of trial {ident}"
+        body.append(
+            f'<tr class="cohort-row" data-q="{esc(follow)}" title="Click for this trial\'s executive summary">'
+            f'<td class="cohort-id">{esc(ident)}</td>'
+            f'<td>{esc(r.get("indication") or "—")}</td>'
+            f'<td>{esc(r.get("regimen") or "—")}</td>'
+            f'<td>{esc(r.get("phase") or "—")}</td>'
+            f'<td>{esc(r.get("status") or "—")}</td>'
+            f'</tr>'
+        )
+
+    # CSV for the download button, embedded as a data attribute (base64 avoids
+    # quoting headaches). Built from the same rows shown -- no separate query.
+    import base64
+    csv_lines = ["OncoSuite/NCT ID,Indication,Regimen,Phase,Status"]
+    for r in rows:
+        def c(x): return '"' + str(x or "").replace('"', '""') + '"'
+        csv_lines.append(",".join(c(r.get(k)) for k in
+                                  ("nct_id", "indication", "regimen", "phase", "status")))
+    csv_b64 = base64.b64encode("\n".join(csv_lines).encode("utf-8")).decode("ascii")
+
+    insights = ""
+    if syn.get("insights"):
+        items = "".join(f"<li>{render_markdown_lite(i).replace('<p>','').replace('</p>','')}</li>"
+                        for i in syn["insights"])
+        insights = f'<div class="cohort-insights"><h4 class="synth-h">Key Insights</h4><ul>{items}</ul></div>'
+
+    next_steps = ""
+    if syn.get("next_steps"):
+        items = "".join(f'<li><button class="nextstep" data-q="{esc(s)}">{esc(s)}</button></li>'
+                        for s in syn["next_steps"])
+        next_steps = f'<div class="cohort-next"><h4 class="synth-h">Next Steps</h4><ul class="nextsteps">{items}</ul></div>'
+
+    return (
+        '<div class="cohort-answer">'
+        f'<div class="cohort-lead">{lead}</div>'
+        '<div class="cohort-toolbar">'
+        f'<button class="dl-btn" data-csv="{csv_b64}" data-name="cohorts.csv">⤓ Download CSV</button>'
+        '<span class="cohort-hint">Click any row for that trial\'s executive summary</span>'
+        '</div>'
+        '<div class="table-wrap cohort-wrap"><table class="data-table cohort-table"><thead><tr>'
+        '<th>OncoSuite / NCT ID</th><th>Indication</th><th>Regimen</th><th>Phase</th><th>Status</th>'
+        '</tr></thead><tbody>'
+        + "".join(body) +
+        '</tbody></table></div>'
+        + insights + next_steps +
+        '</div>'
+    )
+
+
 def render_synthesis(synthesis: dict) -> str:
     if not synthesis or not synthesis.get("text"):
         return ""
@@ -4266,6 +4336,8 @@ def render_answer(resp, question=""):
     if mode == "out_of_scope_policy_needed":
         return banner + ('<div class="card warn"><h3>Out of scope</h3>'
                          f'<p>{esc(resp.get("note"))}</p></div>')
+    if mode == "cohort_list":
+        return banner + render_cohort_list(resp.get("synthesis"))
     if mode == "general_knowledge":
         return banner + render_synthesis(resp.get("synthesis"))
     if mode == "agentic":
@@ -4450,6 +4522,14 @@ PAGE = """<!doctype html>
  .load-text { position:relative; }
  .load-text::after { content:''; animation:dots 1.4s steps(4,end) infinite; }
  @keyframes dots { 0%{content:''} 25%{content:'.'} 50%{content:'..'} 75%{content:'...'} }
+ /* ---- live background-step trace (real steps streamed from the server) ---- */
+ .steps { margin:2px 0 0 0; padding:0; list-style:none; font-size:13px; }
+ .steps li { display:flex; align-items:center; gap:8px; color:#6b7688; padding:2px 0;
+     animation:stepin .25s ease; }
+ .steps li.done { color:#3a7a4d; }
+ .steps li.active { color:#2563eb; }
+ .steps .tick { width:14px; text-align:center; flex-shrink:0; }
+ @keyframes stepin { from { opacity:0; transform:translateY(3px);} to {opacity:1;transform:none;} }
 
  @media (max-width: 760px) {
    .sidebar { display:none; }
@@ -4515,6 +4595,25 @@ PAGE = """<!doctype html>
  .data-table td { padding: 8px 12px; border-bottom: 1px solid #f2f4f8; color: #1f2937;
                   vertical-align: top; line-height: 1.45; }
  .data-table tr:last-child td { border-bottom: 0; }
+ /* ---- cohort answer (client spec: clickable rows + download + insights) ---- */
+ .cohort-answer { margin: 4px 0; }
+ .cohort-lead { font-size: 14px; margin-bottom: 8px; }
+ .cohort-toolbar { display: flex; align-items: center; gap: 12px; margin: 6px 0; flex-wrap: wrap; }
+ .dl-btn { background: #2563eb; color: #fff; border: 0; border-radius: 7px; padding: 6px 12px;
+           font-size: 12px; cursor: pointer; }
+ .dl-btn:hover { background: #1d4ed8; }
+ .cohort-hint { font-size: 12px; color: #9aa4b2; }
+ .cohort-wrap { max-height: 460px; overflow: auto; }   /* vertical + horizontal scroll */
+ .cohort-row { cursor: pointer; }
+ .cohort-row:hover td { background: #eef4ff; }
+ .cohort-id { color: #2563eb; font-weight: 600; white-space: nowrap; }
+ .cohort-insights { margin-top: 14px; }
+ .cohort-next { margin-top: 12px; }
+ ul.nextsteps { list-style: none; padding: 0; margin: 6px 0 0; }
+ ul.nextsteps li { margin: 6px 0; }
+ .nextstep { text-align: left; background: #f0f6ff; border: 1px solid #cfe0fb; color: #1d4ed8;
+             border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer; width: 100%; }
+ .nextstep:hover { background: #e2edff; }
  .data-table tr:hover td { background: #f7f9fc; }
  .synth-h { font-size: 13px; color: #2563eb; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
  .synth-body { font-size: 14.5px; color: #1f2937; }
@@ -4683,7 +4782,7 @@ async function ask(text) {
   if (chat.messages.length === 1) chat.title = text.slice(0, 48);
   save(); renderSidebar(); renderThread();
 
-  // append a loading bubble
+  // append a loading bubble with a LIVE step list (real steps stream in below)
   busy = true;
   document.getElementById('sendBtn').disabled = true;
   const inner = document.getElementById('threadInner');
@@ -4691,32 +4790,66 @@ async function ask(text) {
   inner.insertAdjacentHTML('beforeend',
     '<div class="msg bot" id="' + loadId + '"><div class="avatar bot">AI</div>'
     + '<div class="msg-body"><div class="loading"><div class="spinner"></div>'
-    + '<span class="load-text" id="' + loadId + '_t">' + STATUSES[0] + '</span></div></div></div>');
+    + '<span class="load-text" id="' + loadId + '_t">Working</span></div>'
+    + '<ul class="steps" id="' + loadId + '_s"></ul></div></div>');
   scrollDown();
 
-  // rotate the status text while we wait
-  let si = 0;
-  const timer = setInterval(() => {
-    si = (si + 1) % STATUSES.length;
-    const t = document.getElementById(loadId + '_t');
-    if (t) t.textContent = STATUSES[si];
-  }, 1400);
+  const stepsEl = document.getElementById(loadId + '_s');
+  function addStep(textMsg) {
+    // mark the previous step done, add the new one as active
+    const prev = stepsEl.lastElementChild;
+    if (prev) { prev.classList.remove('active'); prev.classList.add('done');
+                prev.querySelector('.tick').textContent = '✓'; }
+    const li = document.createElement('li');
+    li.className = 'active';
+    li.innerHTML = '<span class="tick">•</span><span></span>';
+    li.lastChild.textContent = textMsg;
+    stepsEl.appendChild(li);
+    scrollDown();
+  }
+  function finishSteps() {
+    const last = stepsEl.lastElementChild;
+    if (last) { last.classList.remove('active'); last.classList.add('done');
+                last.querySelector('.tick').textContent = '✓'; }
+  }
 
-  let answerHtml;
+  let answerHtml = null;
   try {
-    const r = await fetch(BASE_PATH + '/ask', {
+    const r = await fetch(BASE_PATH + '/ask/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ q: text }),
     });
-    const data = await r.json();
-    answerHtml = data.html || '<div class="card error">No answer returned.</div>';
+    // Parse the SSE stream frame-by-frame from the response body.
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\\n\\n')) >= 0) {
+        const raw = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        let ev = 'message', data = '';
+        raw.split('\\n').forEach(line => {
+          if (line.startsWith('event:')) ev = line.slice(6).trim();
+          else if (line.startsWith('data:')) data += line.slice(5).trim();
+        });
+        if (!data) continue;
+        const obj = JSON.parse(data);
+        if (ev === 'step') addStep(obj.text);
+        else if (ev === 'answer') { finishSteps(); answerHtml = obj.html; }
+        else if (ev === 'error') { finishSteps();
+          answerHtml = '<div class="card error">Error: ' + esc(obj.message) + '</div>'; }
+      }
+    }
   } catch (e) {
     answerHtml = '<div class="card error">Network error: ' + esc(String(e)) + '</div>';
   }
-  clearInterval(timer);
+  if (answerHtml === null) answerHtml = '<div class="card error">No answer returned.</div>';
 
-  // Show the full answer immediately (no reveal animation).
+  // Replace the loading bubble (with its step trace) by the final answer.
   chat.messages.push({ role: 'bot', html: answerHtml });
   save();
   busy = false;
@@ -4724,6 +4857,25 @@ async function ask(text) {
   renderThread();
   document.getElementById('q').focus();
 }
+
+// Delegated clicks for the cohort table: row -> ask that trial's exec summary;
+// download button -> save the embedded CSV; Next Steps button -> ask that.
+document.getElementById('threadInner').addEventListener('click', function (e) {
+  const dl = e.target.closest('.dl-btn');
+  if (dl) {
+    const csv = atob(dl.getAttribute('data-csv'));
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = dl.getAttribute('data-name') || 'cohorts.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    return;
+  }
+  const ns = e.target.closest('.nextstep');
+  if (ns) { if (!busy) ask(ns.getAttribute('data-q')); return; }
+  const row = e.target.closest('.cohort-row');
+  if (row) { if (!busy) ask(row.getAttribute('data-q')); return; }
+});
 
 renderSidebar();
 renderThread();
@@ -4778,10 +4930,98 @@ class Handler(BaseHTTPRequestHandler):
         path = self._path()
         if path == "/ask":
             self._handle_ask_html()
+        elif path == "/ask/stream":
+            self._handle_ask_stream()
         elif path == "/api/ask":
             self._handle_ask_json()
         else:
             self.send_error(404)
+
+    def _handle_ask_stream(self):
+        """Server-Sent Events endpoint: streams the REAL background steps as they
+        happen (like Claude showing its work), then the final answer HTML.
+
+        Frames:
+          event: step    data: {"text": "Searching the trial database"}
+          event: answer  data: {"html": "<...rendered answer...>"}
+          event: error   data: {"message": "..."}
+
+        handle_turn runs in a worker thread and pushes each on_step message into a
+        queue; this request thread drains the queue and flushes an SSE frame per
+        step, so the user sees progress in real time on the one open connection."""
+        q, err = self._read_question()
+        if err is not None or not q:
+            self._send(json.dumps({"html": '<div class="card error">Bad request.</div>'}),
+                       "application/json", 400)
+            return
+
+        # We write the status line + headers MANUALLY with HTTP/1.1 + chunked
+        # transfer encoding. BaseHTTPRequestHandler.send_response() stamps HTTP/1.0,
+        # which has no chunked encoding -- so a keep-alive response with no
+        # Content-Length makes the BROWSER buffer the whole body (or wait for the
+        # socket to close) and the live steps never appear. Chunked framing lets the
+        # browser's fetch() reader see each SSE frame the instant we flush it.
+        head = (
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/event-stream; charset=utf-8\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Connection: close\r\n"
+            "X-Accel-Buffering: no\r\n"      # tell nginx not to buffer the stream
+            "Transfer-Encoding: chunked\r\n"
+            "\r\n"
+        )
+        self.wfile.write(head.encode("utf-8"))
+        self.wfile.flush()
+
+        def emit(event, obj):
+            frame = f"event: {event}\ndata: {json.dumps(obj)}\n\n".encode("utf-8")
+            # one HTTP chunk: hex length CRLF, payload, CRLF
+            self.wfile.write(f"{len(frame):X}\r\n".encode("ascii"))
+            self.wfile.write(frame)
+            self.wfile.write(b"\r\n")
+            self.wfile.flush()
+
+        def end_stream():
+            self.wfile.write(b"0\r\n\r\n")   # terminating zero-length chunk
+            self.wfile.flush()
+
+        try:
+            # Smalltalk short-circuits with no background steps.
+            chit = smalltalk_reply(q)
+            if chit is not None:
+                emit("answer", {"html": chit})
+                end_stream()
+                return
+
+            steps = queue.Queue()
+            result = {}
+
+            def worker():
+                try:
+                    resp = handle_turn(SESSION_ID, q, on_step=lambda m: steps.put(("step", m)))
+                    result["html"] = render_answer(resp, q)
+                except Exception as e:
+                    result["error"] = str(e)
+                finally:
+                    steps.put(("done", None))
+
+            t = threading.Thread(target=worker, daemon=True)
+            t.start()
+
+            # Drain step messages until the worker signals done.
+            while True:
+                kind, payload = steps.get()
+                if kind == "done":
+                    break
+                emit("step", {"text": payload})
+            if "error" in result:
+                emit("error", {"message": result["error"]})
+            else:
+                emit("answer", {"html": result.get("html")
+                                or '<div class="card error">No answer returned.</div>'})
+            end_stream()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # client navigated away mid-stream; nothing more to do
 
     def _read_question(self):
         """Parse {"q": ...} (or {"question": ...}) from the request body. Returns

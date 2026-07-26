@@ -3,7 +3,7 @@ Populate vocab_terms by scanning real distinct values out of cohort_info's
 controlled-vocabulary jsonb columns. Run this once, then re-run whenever
 the bronze->gold load refreshes (per the design docs' nightly-refresh assumption).
 """
-from db import get_conn
+from db import get_conn, get_write_conn
 
 VOCAB_FIELDS = [
     "biomarkers", "biomarker_variant", "organ", "histology", "sub_histology",
@@ -27,8 +27,7 @@ def ensure_table(cur):
 
 
 def build():
-    conn = get_conn()
-    conn.set_session(readonly=False, autocommit=True)
+    conn = get_write_conn()
     cur = conn.cursor()
     ensure_table(cur)
     total = 0

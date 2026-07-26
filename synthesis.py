@@ -48,6 +48,12 @@ flag it as low-confidence instead).
 
 {format_contract}
 
+CONVERSATION SO FAR (for follow-up / cross-questioning ONLY -- the user may refer to your
+previous answer, ask "why did you exclude X?", "explain the third row", or "filter those to
+Phase 3". Use this to understand what they mean, but STILL ground every fact in the
+TOOL_RESULT below -- never restate a prior claim you can't back with the current data):
+{history}
+
 WHEN THE QUESTION IS A COMPARISON OR ANALYSIS, prefer these sections (using the formatting
 rules above): a lead **Executive Summary** sentence, a **Comparison Table** with the actual
 numbers (never prose-only for a comparison), **Key Clinical Insights** bullets, and
@@ -70,10 +76,15 @@ CITATIONS AVAILABLE:
 """
 
 
-def synthesize(user_message: str, intent: str, tool_name: str, tool_result: dict) -> dict:
+def synthesize(user_message: str, intent: str, tool_name: str, tool_result: dict,
+               history=None) -> dict:
     """
     Returns {"text": str, "mode": "llm"|"deterministic", "table_data": list|None}
     so callers (web_app.py) can render the table separately from the prose if useful.
+
+    history: optional list of prior {"role","content"} turns. Passed into the LLM
+    prompt so follow-up / cross-questioning ("why did you exclude X?", "filter those
+    to Phase 3") is understood in context. Facts still come from tool_result.
     """
     citations = _gather_citations(tool_result)
 
@@ -83,6 +94,7 @@ def synthesize(user_message: str, intent: str, tool_name: str, tool_result: dict
                 question=user_message, tool_name=tool_name,
                 tool_result=tool_result, citations=citations,
                 format_contract=config.ANSWER_FORMAT_CONTRACT,
+                history=_format_history(history),
             )
             text = llm_client.chat([{"role": "user", "content": prompt}])
             return {"text": text, "mode": "llm", "table_data": None}
@@ -90,6 +102,66 @@ def synthesize(user_message: str, intent: str, tool_name: str, tool_result: dict
             pass  # fall through to the deterministic renderer below
 
     return _deterministic_synthesis(intent, tool_name, tool_result, citations)
+
+
+def synthesize_cohorts(user_message: str, tr: dict) -> dict:
+    """Cohort-level answer (client's spec). Returns a payload the dedicated web
+    renderer turns into: a 'N cohorts within M trials' line, an interactive table
+    (clickable rows -> per-trial exec summary), Key Insights, and Next Steps.
+
+    We DON'T route this through the LLM -- the table is structured data and must
+    stay exact (ids, regimens), so we build deterministic prose + hand the rows
+    to the renderer verbatim. Every value is copied from tr, never generated.
+    """
+    results = tr.get("results") or []
+    n_cohorts = tr.get("total_cohorts", len(results))
+    n_trials = tr.get("total_trials")
+
+    # A short, honest Key Insights derived only from the returned rows.
+    phases, statuses = {}, {}
+    for r in results:
+        phases[r.get("phase") or "—"] = phases.get(r.get("phase") or "—", 0) + 1
+        statuses[r.get("status") or "—"] = statuses.get(r.get("status") or "—", 0) + 1
+    insights = []
+    if phases:
+        top_phase = max(phases.items(), key=lambda kv: kv[1])
+        insights.append(f"Most cohorts shown are **{top_phase[0]}** ({top_phase[1]} of {len(results)}).")
+    if statuses:
+        recruiting = sum(v for k, v in statuses.items() if "recruit" in k.lower())
+        if recruiting:
+            insights.append(f"**{recruiting}** of the shown cohorts are actively recruiting.")
+
+    lead = (f"We found **{n_cohorts} cohorts**"
+            + (f" within **{n_trials} trials**" if n_trials is not None else "")
+            + f" matching your query. Showing {len(results)}.")
+
+    return {
+        "mode": "cohort_list",
+        "text": lead,                 # plain fallback if HTML renderer isn't used
+        "lead": lead,
+        "rows": results,              # renderer builds the interactive table from these
+        "insights": insights,
+        "next_steps": [
+            "Do you want me to run analytics on these to find actionable patterns?",
+            "Do you want to see the survival/response evidence (hazard ratios and "
+            "endpoint outcomes) for the top cohorts?",
+        ],
+    }
+
+
+def _format_history(history) -> str:
+    """Render recent turns as a compact transcript for the prompt. Returns a
+    placeholder when there's nothing yet (first turn of a session)."""
+    if not history:
+        return "(none -- this is the first question in the session)"
+    lines = []
+    for turn in history[-8:]:                      # last few turns is plenty of context
+        role = "User" if turn.get("role") == "user" else "Assistant"
+        content = (turn.get("content") or "").strip()
+        if len(content) > 800:                     # keep the prompt bounded
+            content = content[:800] + " ...[truncated]"
+        lines.append(f"{role}: {content}")
+    return "\n".join(lines)
 
 
 def _gather_citations(tool_result: dict) -> list:
@@ -344,14 +416,17 @@ def _synthesize_search_results(tr: dict, citations: list) -> dict:
                 "mode": "deterministic", "table_data": None}
 
     lines = ["**Executive Summary**",
-             f"Found {total} matching trial(s); showing {len(results)}."]
+             f"Found {total} matching trial(s); showing {len(results)}."
+             + ("" if len(results) >= total
+                else " Ask **\"show all\"** to page through the full list.")]
 
-    lines.append("\n**Comparison Table**\n")
-    lines.append("| NCT ID | Phase | Status | Sponsor | Enrollment |")
-    lines.append("|---|---|---|---|---|")
-    for r in results[:15]:
-        lines.append(f"| {r.get('nct_id')} | {r.get('phase')} | {r.get('status')} "
-                     f"| {r.get('sponsor')} | {r.get('enrollment')} |")
+    lines.append("\n**Matching Trials**\n")
+    lines.append("| # | NCT ID | Trial | Phase | Status | Sponsor | Enrollment |")
+    lines.append("|---|---|---|---|---|---|---|")
+    for i, r in enumerate(results, start=1):     # show the FULL page, not just 15
+        title = (r.get("title") or "")[:80]
+        lines.append(f"| {i} | {r.get('nct_id') or '—'} | {title} | {r.get('phase') or '—'} "
+                     f"| {r.get('status') or '—'} | {r.get('sponsor') or '—'} | {r.get('enrollment') or '—'} |")
 
     by_sponsor = {}
     for r in results:

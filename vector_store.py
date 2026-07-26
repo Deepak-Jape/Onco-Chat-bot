@@ -20,7 +20,7 @@ import math
 
 import config
 import llm_client
-from db import query, get_conn
+from db import query, get_conn, get_write_conn
 from schema_metadata import FREE_TEXT_FIELDS
 
 EMB_TABLE = "oncosuite_gold.text_embeddings"
@@ -44,11 +44,17 @@ CSV_DOC_FIELDS = [
 # Candidate columns (in order) to use as the stable ref_id for a CSV row.
 CSV_ID_FIELDS = ["oncosuite_id", "unique_identifier", "nct_id", "official_title"]
 
+# Sentinel passed as doc_fields to embed EVERY column of a CSV row, for CSVs
+# whose headers don't match the trial schema (e.g. population, facility_info).
+ALL_COLUMNS = object()
+
+# Candidate id columns for the generic (all-columns) CSVs.
+GENERIC_ID_FIELDS = ["facility_id", "country_id", "country", "name", "id"]
+
 
 def ensure_table():
     """Create the embeddings table if missing. Safe to call repeatedly."""
-    conn = get_conn()
-    conn.set_session(readonly=False, autocommit=True)
+    conn = get_write_conn()
     with conn.cursor() as cur:
         cur.execute(
             f"CREATE TABLE IF NOT EXISTS {EMB_TABLE} ("
@@ -77,8 +83,7 @@ def build_index(limit_per_field=None):
     Returns a dict of counts per field. Raises llm_client.LLMUnavailable if embed fails.
     """
     ensure_table()
-    conn = get_conn()
-    conn.set_session(readonly=False, autocommit=True)
+    conn = get_write_conn()
     counts = {}
     for table, field in FREE_TEXT_FIELDS:
         pk = "oncosuite_id" if table in ("trial_info", "cohort_info", "summary",
@@ -110,22 +115,30 @@ def build_index(limit_per_field=None):
     return counts
 
 
-def _csv_doc_and_id(row):
+def _csv_doc_and_id(row, doc_fields=None, id_fields=None):
     """Build (ref_id, document_text) from one CSV row dict.
 
     The document concatenates the meaningful columns into labelled prose so the
     embedding captures the row's full semantic content ("PD-L1 inhibitor NSCLC
     Phase 3 ..."). ref_id is the first available identifier column.
+
+    doc_fields: columns to fold into the document (defaults to the trial-oriented
+                CSV_DOC_FIELDS). Pass ALL_COLUMNS to embed every column in the row
+                -- used for non-trial CSVs (population, facility) whose headers
+                don't match the trial schema.
+    id_fields:  candidate id columns in priority order (defaults to CSV_ID_FIELDS).
     """
+    id_fields = id_fields or CSV_ID_FIELDS
     ref_id = None
-    for k in CSV_ID_FIELDS:
+    for k in id_fields:
         v = row.get(k)
         if v and str(v).strip():
             ref_id = str(v).strip()
             break
 
+    cols = list(row.keys()) if doc_fields is ALL_COLUMNS else doc_fields or CSV_DOC_FIELDS
     parts = []
-    for col in CSV_DOC_FIELDS:
+    for col in cols:
         if col not in row:
             continue
         val = _text_of(row[col]).strip()
@@ -137,21 +150,28 @@ def _csv_doc_and_id(row):
     return ref_id, "\n".join(parts)
 
 
-def build_index_from_csv(path, id_field=None, encoding="utf-8-sig", batch=64):
+def build_index_from_csv(path, id_field=None, encoding="utf-8-sig", batch=64,
+                         doc_fields=None, id_fields=None, field="csv_row"):
     """
     Read an uploaded CSV (e.g. the normalized Manticore export -- one row per
     trial) and embed each row into the SAME text_embeddings table the DB index
     uses, under table_name='csv_upload'. The existing search() then includes
     these rows automatically with no other change.
 
-    id_field: override which column to use as ref_id (else auto-detects from
-              CSV_ID_FIELDS, falling back to the row number).
+    id_field:   override which column to use as ref_id (else auto-detects from
+                id_fields, falling back to the row number).
+    doc_fields: columns to embed. Default = trial-oriented CSV_DOC_FIELDS. Pass
+                ALL_COLUMNS for a CSV whose headers don't match the trial schema
+                (population, facility_info) -- every column gets embedded.
+    id_fields:  candidate id columns in priority order (else CSV_ID_FIELDS).
+    field:      the `field` tag stored per row. Give each non-trial CSV a unique
+                tag (e.g. "population", "facility") so their ref_ids don't collide
+                with trial rows in the (table_name, ref_id, field) unique key.
     Returns {"embedded": n, "skipped": n, "ref_field": <col used>}.
     Raises llm_client.LLMUnavailable if embedding is unavailable.
     """
     ensure_table()
-    conn = get_conn()
-    conn.set_session(readonly=False, autocommit=True)
+    conn = get_write_conn()
 
     with open(path, newline="", encoding=encoding) as f:
         reader = csv.DictReader(f)
@@ -160,11 +180,9 @@ def build_index_from_csv(path, id_field=None, encoding="utf-8-sig", batch=64):
     docs, refs = [], []
     skipped = 0
     for i, row in enumerate(rows):
+        ref, doc = _csv_doc_and_id(row, doc_fields=doc_fields, id_fields=id_fields)
         if id_field and row.get(id_field):
             ref = str(row[id_field]).strip()
-            _, doc = _csv_doc_and_id(row)
-        else:
-            ref, doc = _csv_doc_and_id(row)
         if not doc:                      # nothing embeddable in this row
             skipped += 1
             continue
@@ -183,7 +201,7 @@ def build_index_from_csv(path, id_field=None, encoding="utf-8-sig", batch=64):
                     "VALUES (%s,%s,%s,%s,%s) "
                     "ON CONFLICT (table_name, ref_id, field) DO UPDATE "
                     "SET content=EXCLUDED.content, embedding=EXCLUDED.embedding",
-                    (CSV_TABLE_NAME, ref, "csv_row", content, json.dumps(vec)),
+                    (CSV_TABLE_NAME, ref, field, content, json.dumps(vec)),
                 )
                 embedded += 1
 
@@ -193,8 +211,7 @@ def build_index_from_csv(path, id_field=None, encoding="utf-8-sig", batch=64):
 
 def clear_csv_index():
     """Remove all CSV-uploaded embeddings (leaves DB-built ones intact)."""
-    conn = get_conn()
-    conn.set_session(readonly=False, autocommit=True)
+    conn = get_write_conn()
     with conn.cursor() as cur:
         cur.execute(f"DELETE FROM {EMB_TABLE} WHERE table_name = %s", (CSV_TABLE_NAME,))
         return cur.rowcount

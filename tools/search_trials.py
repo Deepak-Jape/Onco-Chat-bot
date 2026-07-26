@@ -58,13 +58,43 @@ SYNONYM_EXPANSIONS = {
     "3rd line":    ["3L", "3L+"],
     "relapsed":    ["Refractory/Relapsed"],
     "refractory":  ["Refractory/Relapsed"],
+    # Drug-class shorthands. ONLY put terms here where the user's word does NOT
+    # appear anywhere in the data. The real fix for class/modality queries is the
+    # drug_name_or_target clause below now searching modality/class/moa_category
+    # -- so "ADC", "bispecific", "checkpoint", "immunotherapy" already match
+    # directly (the modality value is literally "Antibody-Drug Conjugate (ADC)")
+    # and need NO synonym. Do not re-add those; they'd be redundant. Anything
+    # phrased loosely that isn't in the data at all is caught by the semantic
+    # vector-search fallback, so this table stays tiny by design.
+    "tki":         ["kinase inhibitor"],          # data says "...Kinase Inhibitor", never "TKI"
+    "tkis":        ["kinase inhibitor"],
+    "car-t":       ["cell therapy"],              # data says "Cell Therapy" / "Adoptive Cell Immunotherapy"
+    "car t":       ["cell therapy"],
 }
 
 
 def _expand_synonyms(term):
-    """Return [term, *any coded equivalents]. Case-insensitive on the key."""
-    extra = SYNONYM_EXPANSIONS.get(term.strip().lower(), [])
-    return [term, *extra]
+    """Return [term, *any coded equivalents]. Case-insensitive on the key.
+
+    Also handles simple plurals generically so we don't have to list both forms:
+    a trailing "s" is stripped and the singular is searched too (so "ADCs" finds
+    the "ADC" in the data, "bispecifics" -> "bispecific", etc.) and the singular's
+    synonyms are pulled in as well.
+    """
+    key = term.strip().lower()
+    out = [term]
+    singular = key[:-1] if len(key) > 3 and key.endswith("s") else None
+    if singular and singular != key:
+        out.append(singular)                       # search the singular form too
+    out.extend(SYNONYM_EXPANSIONS.get(key, []))
+    if singular:
+        out.extend(SYNONYM_EXPANSIONS.get(singular, []))
+    # de-dupe, preserve order
+    seen, uniq = set(), []
+    for x in out:
+        if x.lower() not in seen:
+            seen.add(x.lower()); uniq.append(x)
+    return uniq
 
 
 def _term_matches_any_column(term, columns):
@@ -147,7 +177,7 @@ def _academic_exclusion_sql(param_key):
 
 def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_therapy=None,
                    prior_therapy=None, drug_name_or_target=None, phase=None, study_status=None,
-                   sponsor=None, exclude_sponsor_type=None, limit=25, offset=0):
+                   sponsor=None, exclude_sponsor_type=None, limit=50, offset=0):
     """
     exclude_sponsor_type: "academic" to strictly filter OUT university/hospital/institute/
     government sponsors (for queries like "not interested in academia"). Classification is
@@ -218,6 +248,15 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
         filters_extracted = True
         filters_extracted = True
     if drug_name_or_target:
+        # Match a drug by NAME/target OR by CLASS/modality. A user term like "ADC"
+        # is recorded in the data as a modality ("...conjugate"), not a drug name,
+        # so we expand each term through SYNONYM_EXPANSIONS and search the class-
+        # level columns (modality, class, moa_category, mechanism_of_action) in
+        # addition to name/target/brand. Without this, "ADCs" matched only ~4
+        # trials (name contains "ADC") instead of ~72 (modality is a conjugate).
+        expanded = []
+        for d in drug_name_or_target:
+            expanded.extend(_expand_synonyms(d))
         where_clauses.append(
             "EXISTS (SELECT 1 FROM oncosuite_gold.arms_info a2 "
             "JOIN oncosuite_gold.stratification_info s2 ON s2.arm_id = a2.arm_id "
@@ -225,9 +264,12 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
             "LEFT JOIN oncosuite_gold.drug_info d2 ON d2.drug_id = tr2.drug_id "
             "JOIN oncosuite_gold.cohort_info c2 ON c2.cohort_id = a2.cohort_id "
             "WHERE c2.oncosuite_id = t.oncosuite_id "
-            "AND (d2.name ILIKE ANY(%(drug)s) OR d2.target ILIKE ANY(%(drug)s)))"
+            "AND (d2.name ILIKE ANY(%(drug)s) OR d2.target ILIKE ANY(%(drug)s) "
+            "OR d2.brand_name ILIKE ANY(%(drug)s) OR d2.modality ILIKE ANY(%(drug)s) "
+            "OR d2.class ILIKE ANY(%(drug)s) OR d2.moa_category ILIKE ANY(%(drug)s) "
+            "OR d2.mechanism_of_action ILIKE ANY(%(drug)s)))"
         )
-        params["drug"] = [f"%{d}%" for d in drug_name_or_target]
+        params["drug"] = [f"%{d}%" for d in expanded]
         filters_extracted = True
 
     where_sql = " AND ".join(where_clauses)
