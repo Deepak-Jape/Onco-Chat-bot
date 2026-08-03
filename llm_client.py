@@ -238,6 +238,12 @@ def _deepseek_chat(messages):
         "temperature": 0,
         "stream": False,
     }
+    # NOTE: deliberately no max_tokens here. DEEPSEEK_MODEL can be a reasoning
+    # model (deepseek-v4-flash emits reasoning_content before content), and the
+    # cap applies to reasoning + content combined -- so a cap large enough to be
+    # useful is still spent entirely on reasoning, returning finish_reason
+    # "length" with an EMPTY content string. Measured: 2000 -> 0 chars,
+    # 8000 -> 0 chars. Capping turns a slow answer into a silently blank one.
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=data,
@@ -255,9 +261,22 @@ def _deepseek_chat(messages):
     except urllib.error.URLError as e:
         raise LLMUnavailable(f"DeepSeek not reachable at {config.DEEPSEEK_BASE_URL}: {e}") from e
     try:
-        return out["choices"][0]["message"]["content"]
+        choice = out["choices"][0]
+        content = choice["message"]["content"]
     except (KeyError, IndexError) as e:
         raise LLMUnavailable(f"DeepSeek returned an unexpected response shape: {out}") from e
+
+    # A reasoning model that spends its whole budget thinking returns
+    # finish_reason "length" with empty content. Treat that as unavailable so
+    # callers fall back to the deterministic renderer, instead of rendering a
+    # blank answer as if the model had succeeded.
+    if not (content or "").strip():
+        reason = choice.get("finish_reason")
+        raise LLMUnavailable(
+            f"DeepSeek returned empty content (finish_reason={reason}); "
+            "the model likely exhausted its budget on reasoning tokens"
+        )
+    return content
 
 
 def _deepseek_embed(texts):

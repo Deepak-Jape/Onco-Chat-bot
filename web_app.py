@@ -3282,6 +3282,38 @@ def _plain_text(html_str):
     return re.sub(r"[ \t]+", " ", text).strip()
 
 
+def _answer_trial_ids(resp, limit=200):
+    """oncosuite_ids an answer is about, for the chart pipeline.
+
+    Charts are built from the trials the answer actually covers, so the front-end
+    sends these back to POST /api/charts. Tool results carry ids in several
+    shapes depending on the tool (a single detail id, `results` rows, `rows`
+    rows), so check each and de-duplicate while preserving order.
+    """
+    tr = resp.get("tool_result") or {}
+    if not isinstance(tr, dict):
+        return []
+
+    found = []
+    single = tr.get("oncosuite_id")
+    if single:
+        found.append(single)
+    for key in ("results", "rows", "cohorts", "trials"):
+        for row in (tr.get(key) or []):
+            if isinstance(row, dict) and row.get("oncosuite_id"):
+                found.append(row["oncosuite_id"])
+
+    seen, out = set(), []
+    for i in found:
+        i = str(i)
+        if i not in seen:
+            seen.add(i)
+            out.append(i)
+            if len(out) >= limit:
+                break
+    return out
+
+
 def _api_result(question, resp):
     """Build the structured JSON payload for POST /api/ask from a handle_turn response.
     Exposes the useful data (answer text, source trials, rows, sql) but NO HTML and NO
@@ -4097,6 +4129,64 @@ def _strip_trace_metadata(md: str) -> str:
     return "\n".join(kept)
 
 
+def _plain_cell(cell: str) -> str:
+    """Strip the inline markdown / HTML a table cell may carry so the CSV export
+    holds the plain text the user sees, not the markup behind it."""
+    s = re.sub(r"<[^>]+>", "", str(cell or ""))
+    s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+    # markdown links -> just the label
+    s = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", s)
+    s = re.sub(r"[_*`]", "", s)
+    return s.strip()
+
+
+def _table_dl_button(csv_rows: list, filename: str) -> str:
+    """Toolbar with a Download CSV button carrying the table's data inline.
+
+    The CSV is base64'd into a data attribute (same approach as the cohort table)
+    so the download needs no extra round-trip and always matches what is shown."""
+    import base64
+
+    def cell(x):
+        return '"' + str(x if x is not None else "").replace('"', '""') + '"'
+
+    csv_text = "\n".join(",".join(cell(c) for c in row) for row in csv_rows)
+    b64 = base64.b64encode(csv_text.encode("utf-8")).decode("ascii")
+    return (f'<div class="tbl-toolbar">'
+            f'<button class="dl-btn" data-csv="{b64}" data-name="{esc(filename)}">'
+            f'&#10515; Download CSV</button></div>')
+
+
+# Rows shown per page in a rendered answer table. Long result sets (1,500+
+# trials) are unusable as one scroll, so the markup carries every row and the
+# front-end reveals one page at a time.
+TABLE_PAGE_SIZE = 10
+
+
+def _table_pager(pages: int, total_rows: int) -> str:
+    """Prev / 1 2 3 … N / Next control beneath a paginated table.
+
+    Page buttons are emitted for the first three and the last page with an
+    ellipsis between, so the control stays narrow for very large tables. The
+    front-end handles clicks (see the .tbl-pager delegate) -- no round-trip."""
+    nums = list(range(1, pages + 1)) if pages <= 5 else [1, 2, 3, None, pages]
+    buttons = []
+    for n in nums:
+        if n is None:
+            buttons.append('<span class="pg-gap">&hellip;</span>')
+        else:
+            active = ' aria-current="page"' if n == 1 else ""
+            buttons.append(f'<button class="pg-num" data-page="{n}"{active}>{n}</button>')
+    return (
+        f'<div class="tbl-pager" data-pages="{pages}" data-page="1" '
+        f'data-size="{TABLE_PAGE_SIZE}" data-total="{total_rows}">'
+        '<button class="pg-prev" disabled>&lsaquo; Prev</button>'
+        + "".join(buttons)
+        + '<button class="pg-next">Next &rsaquo;</button>'
+        '</div>'
+    )
+
+
 def render_markdown_lite(md: str) -> str:
     """Minimal, dependency-free markdown -> HTML for the subset synthesis.py and the LLM
     prompts ask for: bold headers (**Header** or "## Header"), pipe tables, bullet lines
@@ -4122,18 +4212,43 @@ def render_markdown_lite(md: str) -> str:
             table_buf.clear()
             return
         head_cells = [c.strip() for c in rows[0].strip("|").split("|")]
-        # Wrap the table in a horizontally-scrollable container so wide tables
-        # (many columns / long cells) scroll instead of being cut off by the bubble.
-        out.append("<div class='table-wrap'><table class='data-table'><thead><tr>" +
-                   "".join(f"<th>{_inline_md(c)}</th>" for c in head_cells) + "</tr></thead><tbody>")
+        # Collect the raw (un-marked-up) cells alongside the rendered ones so the
+        # Download CSV button exports exactly what the table shows.
+        csv_rows = [head_cells]
+        body_html = []
         for r in rows[1:]:
             cells = [c.strip() for c in r.strip("|").split("|")]
             # pad/truncate to header width so cells never spill or misalign
             while len(cells) < len(head_cells):
                 cells.append("")
             cells = cells[:len(head_cells)]
-            out.append("<tr>" + "".join(f"<td>{_inline_md(c)}</td>" for c in cells) + "</tr>")
+            csv_rows.append([_plain_cell(c) for c in cells])
+            # data-page lets the front-end show one page at a time without
+            # re-fetching; every row is present in the markup (and in the CSV
+            # export), just hidden until its page is selected.
+            page_no = len(body_html) // TABLE_PAGE_SIZE + 1
+            body_html.append(
+                f'<tr data-page="{page_no}">'
+                + "".join(f"<td>{_inline_md(c)}</td>" for c in cells)
+                + "</tr>"
+            )
+
+        pages = max(1, (len(body_html) + TABLE_PAGE_SIZE - 1) // TABLE_PAGE_SIZE)
+
+        # Wrap the table in a horizontally-scrollable container so wide tables
+        # (many columns / long cells) scroll instead of being cut off by the bubble.
+        out.append('<div class="tbl-block"'
+                   + (f' data-pages="{pages}"' if pages > 1 else "")
+                   + ">"
+                   + _table_dl_button(csv_rows, "table.csv")
+                   + "<div class='table-wrap'><table class='data-table'><thead><tr>"
+                   + "".join(f"<th>{_inline_md(c)}</th>" for c in head_cells)
+                   + "</tr></thead><tbody>")
+        out.extend(body_html)
         out.append("</tbody></table></div>")
+        if pages > 1:
+            out.append(_table_pager(pages, len(body_html)))
+        out.append("</div>")
         table_buf.clear()
 
     for line in lines:
@@ -4413,11 +4528,30 @@ def render_answer(resp, question=""):
             return banner + id_note_html + detail_html + synthesis_html
         return banner + id_note_html + synthesis_html + detail_html
     if tool == "search_trials":
+        # The synthesis already renders these trials as a paginated table, so
+        # emitting a card per trial underneath just repeats every row (200 cards
+        # under a 200-row table). Keep the cards only when there is no table.
+        if "<table" in synthesis_html:
+            return banner + synthesis_html
         return banner + synthesis_html + render_search_results(tr)
     if tool == "get_competitive_landscape":
         return banner + synthesis_html + render_landscape(tr)
     if tool == "compare_arms":
         return banner + synthesis_html + render_compare_arms(tr)
+    # A tool that returned only an error has nothing to render as data. Show the
+    # message plainly instead of dumping {"error": ...} as JSON at the user --
+    # this is what an under-specified question (e.g. asking for "the primary
+    # endpoints" with no trial in the question or the session) lands on.
+    if isinstance(tr, dict) and tr.get("error") and len(tr) == 1:
+        msg = str(tr["error"])
+        hint = ""
+        if "session context" in msg or "resolve trial" in msg:
+            hint = ("<p class=\"answer-sub\">Name a trial (for example "
+                    "<em>&ldquo;primary endpoints for NCT06881784&rdquo;</em>), or run a "
+                    "search first and then ask a follow-up about one of the results.</p>")
+        return (banner + synthesis_html
+                + f'<div class="card warn"><p>{esc(msg)}</p>{hint}</div>')
+
     # fallback: pretty JSON
     return banner + synthesis_html + f'<div class="card"><pre>{esc(json.dumps(to_plain(tr), indent=2))}</pre></div>'
 
@@ -4454,15 +4588,33 @@ PAGE = """<!doctype html>
  .chats-label { display:flex; align-items:center; justify-content:space-between; padding:10px 18px 4px;
      font-size:12px; font-weight:700; color:#374151; }
  .chat-list { flex:1; overflow-y:auto; padding:2px 10px 10px; }
- .chat-item { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px;
+ .chat-item { position:relative; display:flex; align-items:center; gap:6px; padding:8px 10px; border-radius:8px;
      font-size:13px; color:#374151; cursor:pointer; margin-bottom:1px; white-space:nowrap;
      overflow:hidden; text-overflow:ellipsis; }
  .chat-item:hover { background:#eef2f8; }
  .chat-item.active { background:#e4ebf7; color:#1e3a8a; font-weight:600; }
+ .ic { width:15px; height:15px; flex-shrink:0; display:block; }
+ .chat-item .ci-pin { flex-shrink:0; color:#f59e0b; display:flex; }
+ .chat-item .ci-pin .ic { width:13px; height:13px; }
  .chat-item .ci-title { flex:1; overflow:hidden; text-overflow:ellipsis; }
- .chat-item .ci-del { opacity:0; color:#9aa4b2; font-size:15px; padding:0 2px; }
- .chat-item:hover .ci-del { opacity:1; }
- .chat-item .ci-del:hover { color:#dc2626; }
+ /* inline rename field: replaces the title while editing */
+ .chat-item .ci-edit { flex:1; min-width:0; font:inherit; color:#1f2937; padding:1px 4px;
+     border:1px solid #2563eb; border-radius:5px; outline:none; background:#fff; }
+ .chat-item .ci-menu { opacity:0; flex-shrink:0; color:#9aa4b2; line-height:1; display:flex;
+     align-items:center; padding:3px; border-radius:5px; }
+ .chat-item:hover .ci-menu, .chat-item .ci-menu.open { opacity:1; }
+ .chat-item .ci-menu:hover { background:#dfe6f1; color:#374151; }
+ /* the pin/rename/delete popup */
+ .ci-pop { position:absolute; z-index:50; min-width:150px; background:#fff; border:1px solid #e5e9f0;
+     border-radius:9px; box-shadow:0 6px 20px rgba(16,24,40,.14); padding:4px; font-size:13px; }
+ .ci-pop button { display:flex; align-items:center; gap:9px; width:100%; padding:7px 9px; border:0;
+     background:transparent; color:#374151; font:inherit; text-align:left; border-radius:6px; cursor:pointer; }
+ .ci-pop button:hover { background:#f2f5fa; }
+ .ci-pop button.danger { color:#dc2626; }
+ .ci-pop button.danger:hover { background:#fef2f2; }
+ .ci-pop .sep { height:1px; background:#eef1f6; margin:4px 2px; }
+ .chats-label .cl-sub { font-size:11px; font-weight:600; color:#9aa4b2; text-transform:uppercase;
+     letter-spacing:.04em; padding:8px 8px 3px; }
  .sidebar-foot { padding:12px 16px; border-top:1px solid #e5e9f0; font-size:11px; color:#9aa4b2; }
 
  /* ---- main chat column ---- */
@@ -4522,13 +4674,23 @@ PAGE = """<!doctype html>
  .load-text { position:relative; }
  .load-text::after { content:''; animation:dots 1.4s steps(4,end) infinite; }
  @keyframes dots { 0%{content:''} 25%{content:'.'} 50%{content:'..'} 75%{content:'...'} }
- /* ---- live background-step trace (real steps streamed from the server) ---- */
- .steps { margin:2px 0 0 0; padding:0; list-style:none; font-size:13px; }
- .steps li { display:flex; align-items:center; gap:8px; color:#6b7688; padding:2px 0;
+ /* ---- live background-step trace (real steps streamed from the server) ----
+    Typography is pinned to the Figma spec: every line is 14px / 20px / weight
+    500; only the colour changes with state (done .45, active .85, header .65). */
+ .trace-head { font-size:14px; line-height:20px; font-weight:500; color:rgba(0,0,0,0.65);
+     margin:0 0 12px; }
+ .steps { margin:0; padding:0; list-style:none; }
+ .steps li { display:flex; align-items:flex-start; gap:12px; padding:0 0 24px 0;
      animation:stepin .25s ease; }
- .steps li.done { color:#3a7a4d; }
- .steps li.active { color:#2563eb; }
- .steps .tick { width:14px; text-align:center; flex-shrink:0; }
+ .steps li:last-child { padding-bottom:0; }
+ .steps .tick { width:16px; flex-shrink:0; font-size:13px; line-height:20px; text-align:center; }
+ .steps li.done .tick { color:#22a06b; }
+ .steps li.active .tick { color:#2563eb; font-size:10px; }
+ .steps .st-body { min-width:0; }
+ .steps .st-title { font-size:14px; line-height:20px; font-weight:500; color:rgba(0,0,0,0.45); }
+ .steps li.active .st-title { color:rgba(0,0,0,0.85); }
+ .steps .st-sub { font-size:12px; line-height:18px; font-weight:400; color:rgba(0,0,0,0.35);
+     margin-top:2px; }
  @keyframes stepin { from { opacity:0; transform:translateY(3px);} to {opacity:1;transform:none;} }
 
  @media (max-width: 760px) {
@@ -4595,6 +4757,12 @@ PAGE = """<!doctype html>
  .data-table td { padding: 8px 12px; border-bottom: 1px solid #f2f4f8; color: #1f2937;
                   vertical-align: top; line-height: 1.45; }
  .data-table tr:last-child td { border-bottom: 0; }
+ /* every rendered table gets its own Download CSV toolbar, right-aligned above it */
+ .tbl-block { margin: 12px 0; }
+ .tbl-block .table-wrap { margin-top: 0; }
+ .tbl-toolbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+ .tbl-toolbar .dl-btn { background:#fff; color:#374151; border:1px solid #d7deea; font-weight:500; }
+ .tbl-toolbar .dl-btn:hover { background:#f2f5fa; border-color:#c3d0e8; color:#111827; }
  /* ---- cohort answer (client spec: clickable rows + download + insights) ---- */
  .cohort-answer { margin: 4px 0; }
  .cohort-lead { font-size: 14px; margin-bottom: 8px; }
@@ -4696,11 +4864,118 @@ function activeChat() { return chats.find(c => c.id === activeId); }
 
 function selectChat(id) { activeId = id; renderSidebar(); renderThread(); }
 
-function deleteChat(id, ev) {
-  ev.stopPropagation();
-  chats = chats.filter(c => c.id !== id);
+function deleteChat(id) {
+  const c = chats.find(x => x.id === id);
+  if (!confirm('Delete "' + ((c && c.title) || 'this chat') + '"? This cannot be undone.')) return;
+  chats = chats.filter(x => x.id !== id);
   if (activeId === id) activeId = null;
   save(); renderSidebar(); renderThread();
+}
+
+// Pinned chats float to the top of the list and keep a pin glyph.
+function togglePin(id) {
+  const c = chats.find(x => x.id === id);
+  if (!c) return;
+  c.pinned = !c.pinned;
+  save(); renderSidebar();
+}
+
+// Rename happens inline: the title span is swapped for an input, committed on
+// Enter/blur and abandoned on Escape.
+function startRename(id) {
+  const row = document.querySelector('.chat-item[data-id="' + id + '"]');
+  if (!row) return;
+  const titleEl = row.querySelector('.ci-title');
+  const c = chats.find(x => x.id === id);
+  if (!titleEl || !c) return;
+  const input = document.createElement('input');
+  input.className = 'ci-edit';
+  input.value = c.title || '';
+  let settled = false;
+  const commit = (keep) => {
+    if (settled) return;
+    settled = true;
+    if (keep) { const v = input.value.trim(); if (v) c.title = v.slice(0, 80); save(); }
+    renderSidebar();
+  };
+  input.onclick = (e) => e.stopPropagation();
+  input.onkeydown = (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); commit(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
+  };
+  input.onblur = () => commit(true);
+  titleEl.replaceWith(input);
+  input.focus(); input.select();
+}
+
+// Inline SVGs rather than emoji/dingbat entities: the sidebar font stack has no
+// glyphs for those codepoints and falls back to garbage like "OC" / "Y1".
+const _svg = (d, extra) => '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+  + ' stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + d + (extra || '') + '</svg>';
+const ICON = {
+  pin:    _svg('<path d="M9 4h6l-1 6 3 3H7l3-3-1-6Z"/><path d="M12 13v7"/>'),
+  pencil: _svg('<path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="M15 6l3 3"/>'),
+  trash:  _svg('<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/>'
+             + '<path d="M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>'),
+  dots:   _svg('<circle cx="12" cy="5" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/>'
+             + '<circle cx="12" cy="19" r="1.4" fill="currentColor"/>'),
+  down:   _svg('<path d="M12 4v11"/><path d="M7 12l5 5 5-5"/><path d="M5 20h14"/>'),
+};
+
+function closeChatMenu() {
+  document.querySelectorAll('.ci-pop').forEach(p => p.remove());
+  document.querySelectorAll('.ci-menu.open').forEach(b => b.classList.remove('open'));
+}
+
+// Anchor the popup to the row in fixed coords so it is never clipped by the
+// chat list's overflow:auto.
+function openChatMenu(id, ev) {
+  ev.stopPropagation();
+  const wasOpen = ev.currentTarget.classList.contains('open');
+  closeChatMenu();
+  if (wasOpen) return;
+  ev.currentTarget.classList.add('open');
+  const c = chats.find(x => x.id === id);
+  const pop = document.createElement('div');
+  pop.className = 'ci-pop';
+  pop.style.position = 'fixed';
+  pop.innerHTML =
+      '<button data-act="pin">' + ICON.pin
+    + (c && c.pinned ? 'Unpin chat' : 'Pin chat') + '</button>'
+    + '<button data-act="rename">' + ICON.pencil + 'Rename</button>'
+    + '<div class="sep"></div>'
+    + '<button class="danger" data-act="delete">' + ICON.trash + 'Delete</button>';
+  pop.onclick = (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    e.stopPropagation();
+    const act = b.getAttribute('data-act');
+    closeChatMenu();
+    if (act === 'pin') togglePin(id);
+    else if (act === 'rename') startRename(id);
+    else if (act === 'delete') deleteChat(id);
+  };
+  document.body.appendChild(pop);
+  const r = ev.currentTarget.getBoundingClientRect();
+  const h = pop.offsetHeight;
+  pop.style.left = Math.round(r.left - 6) + 'px';
+  // flip above the button when there is no room below
+  pop.style.top = (r.bottom + h + 8 > window.innerHeight ? Math.round(r.top - h - 4)
+                                                         : Math.round(r.bottom + 4)) + 'px';
+}
+
+document.addEventListener('click', closeChatMenu);
+window.addEventListener('resize', closeChatMenu);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeChatMenu(); });
+
+function chatRowHtml(c) {
+  return '<div class="chat-item ' + (c.id === activeId ? 'active' : '') + '" data-id="' + c.id + '"'
+    + ' onclick="selectChat(\\'' + c.id + '\\')">'
+    + (c.pinned ? '<span class="ci-pin" title="Pinned">' + ICON.pin + '</span>' : '')
+    + '<span class="ci-title">' + esc(c.title || 'New Query') + '</span>'
+    + '<span class="ci-menu" title="More" onclick="openChatMenu(\\'' + c.id + '\\', event)">' + ICON.dots + '</span>'
+    + '</div>';
 }
 
 function renderSidebar() {
@@ -4713,12 +4988,15 @@ function renderSidebar() {
       + (term ? 'No matching chats.' : 'No chats yet.') + '</div>';
     return;
   }
-  list.innerHTML = shown.map(c => (
-    '<div class="chat-item ' + (c.id === activeId ? 'active' : '') + '" onclick="selectChat(\\'' + c.id + '\\')">'
-    + '<span class="ci-title">' + esc(c.title || 'New Query') + '</span>'
-    + '<span class="ci-del" title="Delete" onclick="deleteChat(\\'' + c.id + '\\', event)">&times;</span>'
-    + '</div>'
-  )).join('');
+  const pinned = shown.filter(c => c.pinned);
+  const rest = shown.filter(c => !c.pinned);
+  let html = '';
+  if (pinned.length) {
+    html += '<div class="cl-sub">Pinned</div>' + pinned.map(chatRowHtml).join('');
+    if (rest.length) html += '<div class="cl-sub">Recent</div>';
+  }
+  html += rest.map(chatRowHtml).join('');
+  list.innerHTML = html;
 }
 
 function welcomeHtml() {
@@ -4789,29 +5067,48 @@ async function ask(text) {
   const loadId = 'load_' + Date.now();
   inner.insertAdjacentHTML('beforeend',
     '<div class="msg bot" id="' + loadId + '"><div class="avatar bot">AI</div>'
-    + '<div class="msg-body"><div class="loading"><div class="spinner"></div>'
-    + '<span class="load-text" id="' + loadId + '_t">Working</span></div>'
+    + '<div class="msg-body"><div class="trace-head">Analyzing your query...</div>'
     + '<ul class="steps" id="' + loadId + '_s"></ul></div></div>');
   scrollDown();
 
   const stepsEl = document.getElementById(loadId + '_s');
+  let stepNo = 0;
+
+  // The server sends one line per step. The Figma trace shows a numbered title
+  // plus a muted detail line, so split on an em/en dash or colon when the step
+  // text carries one; otherwise the title stands alone.
+  function splitStep(textMsg) {
+    const m = String(textMsg).match(/^(.*?)\\s*(?:[\\u2014\\u2013:])\\s*(.+)$/);
+    return m ? { title: m[1], sub: m[2] } : { title: String(textMsg), sub: '' };
+  }
+  function markDone(li) {
+    if (!li) return;
+    li.classList.remove('active');
+    li.classList.add('done');
+    li.querySelector('.tick').textContent = '✓';
+  }
   function addStep(textMsg) {
-    // mark the previous step done, add the new one as active
-    const prev = stepsEl.lastElementChild;
-    if (prev) { prev.classList.remove('active'); prev.classList.add('done');
-                prev.querySelector('.tick').textContent = '✓'; }
+    markDone(stepsEl.lastElementChild);   // previous step is finished
+    const parts = splitStep(textMsg);
+    stepNo += 1;
     const li = document.createElement('li');
     li.className = 'active';
-    li.innerHTML = '<span class="tick">•</span><span></span>';
-    li.lastChild.textContent = textMsg;
+    const sub = document.createElement('div');
+    sub.className = 'st-sub';
+    sub.textContent = parts.sub;
+    const title = document.createElement('div');
+    title.className = 'st-title';
+    title.textContent = 'Step ' + stepNo + ' — ' + parts.title;
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'st-body';
+    bodyEl.appendChild(title);
+    if (parts.sub) bodyEl.appendChild(sub);
+    li.innerHTML = '<span class="tick">●</span>';
+    li.appendChild(bodyEl);
     stepsEl.appendChild(li);
     scrollDown();
   }
-  function finishSteps() {
-    const last = stepsEl.lastElementChild;
-    if (last) { last.classList.remove('active'); last.classList.add('done');
-                last.querySelector('.tick').textContent = '✓'; }
-  }
+  function finishSteps() { markDone(stepsEl.lastElementChild); }
 
   let answerHtml = null;
   try {
@@ -4923,8 +5220,40 @@ class Handler(BaseHTTPRequestHandler):
         elif path in ("/api/health", "/health"):
             self._send(json.dumps({"status": "ok", "service": "oncosuite"}),
                        "application/json")
+        elif path == "/api/charts":
+            self._handle_charts_catalog()
+        elif path in ("/api/trial", "/search/ExecutiveSummary"):
+            self._handle_trial_summary()
         else:
             self.send_error(404)
+
+    def _handle_trial_summary(self):
+        """GET search/ExecutiveSummary?OncoSuiteId=<id> -- feeds ctsearch's
+        ExecuiteSummaryDrawer, which is used unmodified.
+
+        The path and query parameter match what that component's axios client
+        requests, and the response follows its documented shape (see
+        executive_summary.py), so pointing VITE_API_BASE_URL at this app is all
+        the wiring the drawer needs. `id` is accepted as an alias."""
+        from urllib.parse import parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        trial_id = (qs.get("OncoSuiteId") or qs.get("id") or [""])[0].strip()
+        if not trial_id:
+            self._send(json.dumps({"error": "missing OncoSuiteId"}),
+                       "application/json", 400)
+            return
+        try:
+            from executive_summary import build_executive_summary, resolve_trial_id
+            # Answers cite trials by NCT id; the summary table is keyed by
+            # oncosuite_id, so accept either.
+            data = build_executive_summary(resolve_trial_id(trial_id) or trial_id)
+            if not data:
+                self._send(json.dumps({"error": "trial not found"}),
+                           "application/json", 404)
+                return
+            self._send(json.dumps(data, default=str), "application/json")
+        except Exception as e:
+            self._send(json.dumps({"error": str(e)}), "application/json", 500)
 
     def do_POST(self):
         path = self._path()
@@ -4934,8 +5263,135 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_ask_stream()
         elif path == "/api/ask":
             self._handle_ask_json()
+        elif path == "/api/charts":
+            self._handle_charts()
+        elif path == "/ask/fast":
+            self._handle_ask_fast()
         else:
             self.send_error(404)
+
+    def _handle_ask_fast(self):
+        """SSE chart-first answer: run the tool, pick a chart, return blocks.
+
+        Skips the "write the answer" LLM call entirely -- that stage feeds the
+        whole result set into a prompt for prose and is the slow part (it times
+        out on broad queries). Here the model makes one cheap decision, which
+        chart fits, and every number shown is read straight from oncosuite_gold.
+
+        Frames:
+          event: step    data: {"text": "..."}
+          event: answer  data: {"blocks": [...], "timings": {...}}
+          event: error   data: {"message": "..."}
+        """
+        q, err = self._read_question()
+        if err is not None or not q:
+            self._send(json.dumps({"error": "bad request"}), "application/json", 400)
+            return
+
+        self.wfile.write(b"HTTP/1.1 200 OK\r\n")
+        for header in (b"Content-Type: text/event-stream; charset=utf-8",
+                       b"Cache-Control: no-cache", b"Connection: close",
+                       b"X-Accel-Buffering: no"):
+            self.wfile.write(header + b"\r\n")
+        self.wfile.write(b"\r\n")
+        self.wfile.flush()
+
+        def emit(event, obj):
+            self.wfile.write(f"event: {event}\ndata: {json.dumps(obj)}\n\n".encode("utf-8"))
+            self.wfile.flush()
+
+        try:
+            steps = queue.Queue()
+            result = {}
+
+            def worker():
+                try:
+                    from answer_fast import build_fast_answer, detect_analytics
+
+                    # Analytics questions bypass the router entirely: it marks
+                    # them out of scope or routes to a tool with no rows, and
+                    # the answer comes from the analytics schema regardless.
+                    if detect_analytics(q):
+                        steps.put(("step", "Reading the analytics dataset"))
+                        result["payload"] = build_fast_answer(q, {}, [])
+                        return
+
+                    resp = handle_turn(SESSION_ID, q,
+                                       on_step=lambda m: steps.put(("step", m)),
+                                       skip_synthesis=True)
+                    ids = _answer_trial_ids(resp)
+                    steps.put(("step", "Choosing the best visualisation"))
+                    result["payload"] = build_fast_answer(
+                        q, resp.get("tool_result") or {}, ids, resp=resp)
+                except Exception as e:
+                    result["error"] = str(e)
+                finally:
+                    steps.put(("done", None))
+
+            threading.Thread(target=worker, daemon=True).start()
+
+            while True:
+                kind, payload = steps.get()
+                if kind == "done":
+                    break
+                emit("step", {"text": payload})
+
+            if "error" in result:
+                emit("error", {"message": result["error"]})
+            else:
+                emit("answer", result.get("payload") or {"blocks": []})
+            self.wfile.write(b"")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _handle_charts_catalog(self):
+        """GET /api/charts -- which charts exist and which are currently gated.
+
+        Exposed so the front-end (and a human debugging a missing chart) can see
+        why something is not rendering without reading the source."""
+        try:
+            from chart_data import CHART_SPECS
+            catalog = {
+                name: {"label": s.get("label"), "enabled": bool(s.get("enabled")),
+                       "reason": s.get("disabled_reason")}
+                for name, s in CHART_SPECS.items()
+            }
+            self._send(json.dumps({"charts": catalog}), "application/json")
+        except Exception as e:
+            self._send(json.dumps({"error": str(e)}), "application/json", 500)
+
+    def _handle_charts(self):
+        """POST /api/charts {q, oncosuite_ids[]} -> {"blocks": [...]}.
+
+        The LLM picks which charts suit the question; chart_data builds the props
+        from oncosuite_gold. Charts with no backing data are dropped, so an empty
+        list is a valid, common answer -- not an error."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            payload = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, TypeError):
+            self._send(json.dumps({"error": "bad json"}), "application/json", 400)
+            return
+
+        question = str(payload.get("q") or "").strip()
+        ids = payload.get("oncosuite_ids") or []
+        if not isinstance(ids, list):
+            ids = []
+        # An empty id list is fine: the analytics panels and the maps answer
+        # database-wide questions ("competition intensity by country") that are
+        # not scoped to a particular set of trials.
+        if not question:
+            self._send(json.dumps({"blocks": []}), "application/json")
+            return
+
+        try:
+            from chart_select import build_chart_blocks
+            blocks = build_chart_blocks(question, [str(i) for i in ids][:200])
+            self._send(json.dumps({"blocks": blocks}), "application/json")
+        except Exception as e:
+            self._send(json.dumps({"blocks": [], "error": str(e)}),
+                       "application/json", 500)
 
     def _handle_ask_stream(self):
         """Server-Sent Events endpoint: streams the REAL background steps as they
@@ -5000,6 +5456,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     resp = handle_turn(SESSION_ID, q, on_step=lambda m: steps.put(("step", m)))
                     result["html"] = render_answer(resp, q)
+                    result["ids"] = _answer_trial_ids(resp)
                 except Exception as e:
                     result["error"] = str(e)
                 finally:
@@ -5018,7 +5475,8 @@ class Handler(BaseHTTPRequestHandler):
                 emit("error", {"message": result["error"]})
             else:
                 emit("answer", {"html": result.get("html")
-                                or '<div class="card error">No answer returned.</div>'})
+                                or '<div class="card error">No answer returned.</div>',
+                                "oncosuite_ids": result.get("ids") or []})
             end_stream()
         except (BrokenPipeError, ConnectionResetError):
             pass  # client navigated away mid-stream; nothing more to do

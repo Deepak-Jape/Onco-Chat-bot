@@ -1,0 +1,139 @@
+/* Answer styling lifted from web_app.py's PAGE template.
+
+   The server still renders trial detail, search results, competitive landscape
+   and arm comparison as HTML (see answer_fast.py) -- these are the rules that
+   markup expects. Every selector is scoped under so it cannot
+   leak into the React shell or fight Tailwind's preflight. */
+
+/* Trial ids wrapped by answer_fast.linkify_trial_ids -- clicking one opens the
+   executive-summary drawer. Rendered as a button (not an anchor) so it never
+   navigates; styled to read as a link, matching the Figma Info/600 blue. */
+.server-answer .trial-link {
+  background: none; border: 0; padding: 0; font: inherit;
+  color: rgba(38,102,190,1); font-weight: 500; cursor: pointer;
+  white-space: nowrap;
+}
+.server-answer .trial-link:hover { text-decoration: underline; }
+
+/* Paginated answer tables. Every row is in the markup with a data-page marker;
+   the front-end toggles the .pg-hidden class as pages change, so paging needs
+   no round-trip and the CSV export still contains every row. */
+.server-answer tr.pg-hidden { display: none; }
+
+.server-answer .tbl-pager {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 14px 0 2px; flex-wrap: wrap;
+}
+.server-answer .tbl-pager button {
+  min-width: 30px; height: 30px; padding: 0 9px; border-radius: 4px;
+  border: 1px solid transparent; background: transparent;
+  color: rgba(0,0,0,0.7); font-size: 14px; cursor: pointer;
+}
+.server-answer .tbl-pager button:hover:not(:disabled) { background: #f2f5fa; }
+.server-answer .tbl-pager button[aria-current="page"] {
+  background: #2666be; border-color: #2666be; color: #fff; font-weight: 500;
+}
+.server-answer .tbl-pager button:disabled { color: rgba(0,0,0,0.25); cursor: default; }
+.server-answer .tbl-pager .pg-gap { color: rgba(0,0,0,0.45); padding: 0 4px; }
+
+.server-answer .meta { font-size:12px; color:#9aa4b2; margin-bottom:10px; }
+ .server-answer .answer { background:#f0f6ff; border:1px solid #cfe0fb; border-left:4px solid #2563eb;
+     border-radius:10px; padding:14px 18px; margin-bottom:14px; }
+ .server-answer .answer-lbl { display:block; font-size:12px; color:#2563eb; text-transform:uppercase; letter-spacing:.05em; }
+ .server-answer .answer-val { display:block; font-size:22px; font-weight:700; color:#111827; margin-top:2px; }
+ .server-answer .answer-sub { font-size:12px; color:#9aa4b2; }
+ .server-answer .card { background:#fff; border:1px solid #e5e9f0; border-radius:12px; padding:16px 18px; margin-bottom:14px;
+     box-shadow:0 1px 2px rgba(16,24,40,.03); }
+ .server-answer .card.error { border-color:#f3b4ae; background:#fef4f3; color:#b42318; }
+ .server-answer .card.warn { border-color:#f2d091; background:#fffaf0; }
+ .server-answer h2 { font-size:17px; margin:2px 0 6px; color:#111827; }
+ .server-answer h3 { font-size:15px; margin:2px 0 8px; color:#111827; }
+ .server-answer h4 { font-size:13px; margin:14px 0 6px; color:#2563eb; text-transform:uppercase; letter-spacing:.04em; }
+ .server-answer .title { color:#4b5563; font-size:14px; line-height:1.45; margin:0 0 12px; }
+ .server-answer .tag { display:inline-block; font-size:11px; background:#e4ebf7; color:#1e40af; padding:3px 8px;
+     border-radius:6px; margin-bottom:6px; }
+ .server-answer .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:6px 0; }
+ .server-answer .lbl { display:block; font-size:11px; color:#9aa4b2; text-transform:uppercase; letter-spacing:.04em; }
+ .server-answer .crit-block { margin-top:6px; }
+ .server-answer .crit-key { min-width:150px; color:#6b7280; }
+ .server-answer .crit-val { flex:1; color:#1f2937; }
+ .server-answer .arm { border-left:3px solid #2563eb; padding:8px 12px; margin:10px 0; background:#f7f9fc; border-radius:0 8px 8px 0; }
+ .server-answer .arm-desc { font-size:13px; color:#4b5563; margin:4px 0; }
+ .server-answer .arm-drug { font-size:12px; color:#2563eb; }
+ .server-answer .pill { font-size:11px; background:#eef2f8; padding:2px 7px; border-radius:5px; color:#374151; }
+ .server-answer .count { color:#9aa4b2; font-size:13px; }
+ .server-answer .muted { color:#9aa4b2; }
+ /* Bare tables (trial-detail: contacts, locations, arms, .server-answer safety, .server-answer ...) can have
+    many columns. Make each table its own horizontal scroll region so the last
+    column (e.g. Affiliation) is never clipped by the card edge. display:block +
+    overflow-x:auto turns the table element itself into the scroller. */
+ .server-answer table { display:block; width:100%; max-width:100%; overflow-x:auto; border-collapse:collapse;
+         font-size:13px; -webkit-overflow-scrolling:touch; }
+ .server-answer thead, .server-answer tbody { display:table; width:100%; min-width:max-content; }
+ .server-answer th, .server-answer td { text-align:left; padding:8px 12px; border-bottom:1px solid #eef1f6;
+         vertical-align:top; line-height:1.45; }
+ .server-answer th { color:#6b7280; white-space:nowrap; }
+ .server-answer td { min-width:80px; }
+ .server-answer pre { white-space:pre-wrap; font-size:12px; color:#4b5563; margin:0; }
+ .server-answer a { color:#2563eb; }
+ .server-answer .examples { font-size:12px; color:#9aa4b2; margin-top:6px; }
+ .server-answer .examples a { margin-right:12px; }
+ .server-answer .chart-wrap { margin: 14px 0; }
+ .server-answer .chart-title { font-size: 13px; font-weight: 600; color: #1f2937; margin: 0 0 8px; }
+ /* Scroll container so wide tables never get cut off by the message bubble. */
+ .server-answer .table-wrap { width: 100%; overflow-x: auto; margin: 12px 0; -webkit-overflow-scrolling: touch;
+               border: 1px solid #eef1f6; border-radius: 8px; }
+ /* Inside .table-wrap the wrapper scrolls, so the table is a normal table (undo
+    the global display:block scroller to avoid a double scrollbar). */
+ .server-answer .table-wrap table.data-table { display: table; overflow: visible; }
+ .server-answer .table-wrap thead, .server-answer .table-wrap tbody { display: table-row-group; min-width: 0; }
+ .server-answer .table-wrap thead { display: table-header-group; }
+ .server-answer .data-table { width: 100%; min-width: max-content; border-collapse: collapse; font-size: 13px; }
+ .server-answer .data-table th { text-align: left; color: #6b7280; font-weight: 600; font-size: 11px;
+                   text-transform: uppercase; letter-spacing: .04em; padding: 8px 12px;
+                   border-bottom: 1px solid #eef1f6; white-space: nowrap; background:#fafbfd; }
+ .server-answer .data-table td { padding: 8px 12px; border-bottom: 1px solid #f2f4f8; color: #1f2937;
+                  vertical-align: top; line-height: 1.45; }
+ .server-answer .data-table tr:last-child td { border-bottom: 0; }
+ /* every rendered table gets its own Download CSV toolbar, right-aligned above it */
+ .server-answer .tbl-block { margin: 12px 0; }
+ .server-answer .tbl-block .table-wrap { margin-top: 0; }
+ .server-answer .tbl-toolbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+ .server-answer .tbl-toolbar .dl-btn { background:#fff; color:#374151; border:1px solid #d7deea; font-weight:500; }
+ .server-answer .tbl-toolbar .dl-btn:hover { background:#f2f5fa; border-color:#c3d0e8; color:#111827; }
+ /* ---- cohort answer (client spec: clickable rows + download + insights) ---- */
+ .server-answer .cohort-answer { margin: 4px 0; }
+ .server-answer .cohort-lead { font-size: 14px; margin-bottom: 8px; }
+ .server-answer .cohort-toolbar { display: flex; align-items: center; gap: 12px; margin: 6px 0; flex-wrap: wrap; }
+ .server-answer .dl-btn { background: #2563eb; color: #fff; border: 0; border-radius: 7px; padding: 6px 12px;
+           font-size: 12px; cursor: pointer; }
+ .server-answer .dl-btn:hover { background: #1d4ed8; }
+ .server-answer .cohort-hint { font-size: 12px; color: #9aa4b2; }
+ .server-answer .cohort-wrap { max-height: 460px; overflow: auto; }   /* vertical + horizontal scroll */
+ .server-answer .cohort-row { cursor: pointer; }
+ .server-answer .cohort-row:hover td { background: #eef4ff; }
+ .server-answer .cohort-id { color: #2563eb; font-weight: 600; white-space: nowrap; }
+ .server-answer .cohort-insights { margin-top: 14px; }
+ .server-answer .cohort-next { margin-top: 12px; }
+ .server-answer ul.nextsteps { list-style: none; padding: 0; margin: 6px 0 0; }
+ .server-answer ul.nextsteps li { margin: 6px 0; }
+ .server-answer .nextstep { text-align: left; background: #f0f6ff; border: 1px solid #cfe0fb; color: #1d4ed8;
+             border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer; width: 100%; }
+ .server-answer .nextstep:hover { background: #e2edff; }
+ .server-answer .data-table tr:hover td { background: #f7f9fc; }
+ .server-answer .synth-h { font-size: 13px; color: #2563eb; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
+ .server-answer .synth-body { font-size: 14.5px; color: #1f2937; }
+ .server-answer .synth-body p { margin: 8px 0; line-height: 1.62; }
+ .server-answer .synth-body p:first-child { margin-top: 0; }
+ .server-answer .synth-body strong { color: #111827; font-weight: 650; }
+ .server-answer .synth-body em { color: #6b7280; }
+ .server-answer .synth-body ul { margin: 8px 0; padding-left: 22px; }
+ .server-answer .synth-body li { margin: 4px 0; line-height: 1.55; }
+ .server-answer .synth-hr { border: 0; border-top: 1px solid #eef1f6; margin: 14px 0; }
+ .server-answer .trial-chip { display:inline-block; background:#eff4ff; color:#2563eb; border:1px solid #d5e2fb;
+               border-radius:6px; padding:1px 7px; margin:1px 3px 1px 0; font-size:12px;
+               cursor:pointer; white-space:nowrap; }
+ .server-answer .trial-chip:hover { background:#2563eb; color:#fff; }
+ .server-answer .crit-row { display: flex; gap: 8px; padding: 3px 0; align-items: flex-start; border-bottom:1px solid #f2f4f8; }
+ .server-answer .crit-key { color: #6b7280; min-width: 140px; flex-shrink: 0; font-size: 12px; }
+ .server-answer .crit-val { color: #1f2937; }

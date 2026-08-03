@@ -1146,11 +1146,18 @@ def _record_answer(session_id, synthesis):
             conversations.add_assistant(session_id, text)
 
 
-def handle_turn(session_id: str, user_message: str, on_step=None) -> dict:
+def handle_turn(session_id: str, user_message: str, on_step=None,
+                skip_synthesis: bool = False) -> dict:
     """on_step: optional callback(str) invoked with a human-readable status at each
     real stage (classify -> route -> query -> synthesize). Used by the SSE endpoint
     to STREAM the actual background steps to the UI, like Claude does. Default None
-    keeps the plain blocking behaviour for /ask and the eval harness."""
+    keeps the plain blocking behaviour for /ask and the eval harness.
+
+    skip_synthesis: skip the final "write the answer" LLM call and return the raw
+    tool_result only. That call is by far the slowest stage -- it feeds the whole
+    result set into a prompt and asks for prose -- so the chart-first path
+    (answer_fast.py) sets this and renders the data itself. Default False keeps
+    the existing behaviour for every current caller."""
     def _step(msg):
         if on_step:
             try:
@@ -1425,7 +1432,7 @@ def handle_turn(session_id: str, user_message: str, on_step=None) -> dict:
     filters_extracted = bool(filters and any(v for v in filters.values()))
 
     synthesis = None
-    if escalate:
+    if escalate and not skip_synthesis:
         # NOTE: tool_result here comes ONLY from _dispatch_tool (the 8 real tools).
         # text_to_sql.py's LLM-written SQL path is a completely separate branch in
         # hybrid.py and never reaches this line -- see synthesis.py's module

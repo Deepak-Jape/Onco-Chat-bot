@@ -1,0 +1,79 @@
+/* Tailwind: the vendored ctsearch components are written against it (the
+   executive-summary drawer alone uses 82 utility classes), so without these
+   directives that whole subtree renders unstyled. Scanned paths include
+   vendor/ctsearch -- see tailwind.config.cjs.
+
+   CSS requires @import before any rule, so the shell and server-answer sheets
+   are imported first and then re-declared inside @layer components. That puts
+   them AFTER Tailwind's preflight in the cascade -- loading them before it left
+   the entire shell unstyled. */
+@import "./shell.css" layer(components);
+@import "./server-answer.css" layer(components);
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Shell styling carried over from the server-rendered page so the React UI is
+   visually continuous with what it replaces. Chart internals are NOT styled
+   here -- those components bring their own Figma-derived styling from ctsearch. */
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  /* Rubik is the Figma body face (loaded in index.html); the rest is fallback. */
+  font-family: "Rubik", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: #fff;
+  color: #1f2937;
+}
+
+.app { display: flex; height: 100vh; overflow: hidden; }
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.thread { flex: 1; overflow-y: auto; padding: 24px 0; }
+.thread-inner { max-width: 900px; margin: 0 auto; padding: 0 24px; }
+
+.msg { display: flex; gap: 14px; margin: 0 0 26px; }
+.avatar {
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+}
+.avatar.user { background: #e4ebf7; color: #1e3a8a; }
+.avatar.bot { background: #2563eb; color: #fff; }
+.msg-body { flex: 1; min-width: 0; padding-top: 3px; }
+.msg.user .msg-body { font-size: 15px; line-height: 1.5; }
+
+.composer { border-top: 1px solid #eef1f6; padding: 14px 24px 20px; }
+.composer-inner { max-width: 760px; margin: 0 auto; }
+
+form.bar {
+  display: flex; gap: 8px; align-items: center;
+  border: 1px solid #d7deea; border-radius: 14px; padding: 10px 10px 10px 14px;
+}
+form.bar:focus-within { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.10); }
+form.bar textarea {
+  flex: 1; resize: none; border: 0; background: transparent;
+  font-size: 15px; line-height: 1.4; max-height: 180px; padding: 4px 0;
+  font-family: inherit; outline: none;
+}
+
+.send-btn {
+  width: 34px; height: 34px; flex-shrink: 0; border: 0; border-radius: 50%;
+  background: #111827; color: #fff; font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.send-btn:disabled { background: #c9cfda; cursor: not-allowed; }
+
+.card { border: 1px solid #e5e9f0; border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+.card.error { border-color: #f3b4ae; background: #fef4f3; color: #b42318; }
+
+.table-wrap { width: 100%; overflow-x: auto; margin: 12px 0; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.data-table th {
+  text-align: left; color: #6b7280; font-weight: 600; font-size: 11px;
+  text-transform: uppercase; letter-spacing: .04em; padding: 8px 12px;
+  border-bottom: 1px solid #eef1f6; background: #fafbfd; white-space: nowrap;
+}
+.data-table td { padding: 8px 12px; border-bottom: 1px solid #f2f4f8; vertical-align: top; }

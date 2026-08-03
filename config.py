@@ -14,6 +14,51 @@ can change backend without editing the file:  set ONCOSUITE_LLM_BACKEND=deepseek
 """
 import os
 
+
+def _load_dotenv():
+    """Load .env into the environment (without overriding real env vars).
+
+    Nothing was reading .env before, so a locally-started server came up with no
+    API key and every LLM call failed -- silently, since the callers degrade
+    gracefully. Real environment variables still win, so container/CI config
+    continues to override the file.
+
+    DEEPSEEK_MODEL is also mirrored onto ONCOSUITE_DEEPSEEK_MODEL: .env uses the
+    former, while this module reads the latter, and without the bridge the API
+    is called with a null model and returns HTTP 400.
+
+    Deliberately limited to credential/model/database settings. .env also holds
+    deployment values (ONCOSUITE_HOST/PORT/BASE_PATH set for the container), and
+    loading those would silently move a locally started server from :8000 to
+    :8014 behind /chat-bot. Serving config stays with whoever starts the process.
+    """
+    prefixes = ("DEEPSEEK_", "ANTHROPIC_", "OLLAMA_", "OPENAI_", "PG", "DATABASE_")
+    names = {"ONCOSUITE_LLM_BACKEND", "ONCOSUITE_DEEPSEEK_MODEL",
+             "ONCOSUITE_CLAUDE_MODEL", "ONCOSUITE_OLLAMA_MODEL",
+             "ONCOSUITE_OLLAMA_EMBED", "ONCOSUITE_DB_URL"}
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key, value = key.strip(), value.strip().strip('"').strip("'")
+                if not key or key in os.environ:
+                    continue
+                if key in names or key.startswith(prefixes):
+                    os.environ[key] = value
+    except OSError:
+        return  # no .env is a normal deployment case
+
+    if os.environ.get("DEEPSEEK_MODEL") and not os.environ.get("ONCOSUITE_DEEPSEEK_MODEL"):
+        os.environ["ONCOSUITE_DEEPSEEK_MODEL"] = os.environ["DEEPSEEK_MODEL"]
+
+
+_load_dotenv()
+
 # "ollama" | "claude" | "deepseek" | "off"
 # Default is "off": the app runs fast on the keyword fast-path and NEVER contacts
 # an external model. Flip this once you've picked a backend and set its key/host.
