@@ -1,6 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import ChartBlock from "./charts/ChartBlock.jsx";
+import MapOrTable from "./charts/MapOrTable.jsx";
 import StepTrace from "./components/StepTrace.jsx";
+import StepsSummary from "./components/StepsSummary.jsx";
 import Sidebar from "./components/Sidebar.jsx";
 import Welcome from "./components/Welcome.jsx";
 import useChats from "./useChats.js";
@@ -178,22 +180,35 @@ function Answer({ blocks, onOpenSummary, onServerAnswerClick }) {
             <div
               key={i}
               style={{
-                margin: "16px 0", padding: "18px 20px", borderRadius: 8,
-                background: "#f7f9fc", border: "1px solid rgba(0,0,0,0.05)",
+                margin: "16px 0", padding: 16, borderRadius: 4,
+                background: "#F7FBFF", borderTop: "1px solid #F0F6FE",
+                display: "flex", flexDirection: "column", gap: 4,
               }}
             >
               <h3
                 style={{
-                  margin: "0 0 12px", fontSize: 16, fontWeight: 500,
+                  margin: 0, fontSize: 16, fontWeight: 500,
                   color: "rgba(0,0,0,0.8)",
                 }}
               >
                 {b.title || "Key Insights"}
               </h3>
-              <ul style={{ margin: 0, paddingLeft: 18, color: "rgba(0,0,0,0.7)" }}>
+              <ul style={{ margin: 0, padding: 0, listStyle: "none", color: "rgba(0,0,0,0.7)" }}>
                 {(b.items || []).map((t, j) => (
-                  <li key={j} style={{ fontSize: 14, lineHeight: "22px", marginBottom: 8 }}>
-                    {t}
+                  <li
+                    key={j}
+                    style={{
+                      display: "flex", alignItems: "flex-start", gap: 10,
+                      fontSize: 14, lineHeight: "22px", marginBottom: 8,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 6, height: 6, marginTop: 8, borderRadius: "50%",
+                        background: "rgba(0,0,0,0.2)", flexShrink: 0,
+                      }}
+                    />
+                    <span>{t}</span>
                   </li>
                 ))}
               </ul>
@@ -212,7 +227,7 @@ function Answer({ blocks, onOpenSummary, onServerAnswerClick }) {
               }}
             >
               <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                Not shown — data not available
+                {b.title || "Not shown — data not available"}
               </div>
               <ul style={{ margin: 0, paddingLeft: 18 }}>
                 {(b.items || []).map((t, j) => (
@@ -224,9 +239,27 @@ function Answer({ blocks, onOpenSummary, onServerAnswerClick }) {
         }
 
         if (b.type === "chart") {
+          // MapView and UsHeatMap size themselves to height:"100%", which
+          // collapses to 0px (invisible, but still mounted -- tiles/data load
+          // fine, nothing ever appears) unless an ancestor gives them a real
+          // height to fill -- MapOrTable's Map View branch supplies that;
+          // Table View needs no fixed height, so it isn't set here at all.
+          //
+          // Only PopulationMap/CaseBurdenMap get the Table View toggle: both
+          // share the same rich per-point shape (map_data.py's
+          // build_case_burden_*), so one PanelTable column set fits both.
+          // SiteMap's points are a different, sparser shape ({longitude,
+          // latitude, name, value} -- see chart_data.py's build_site_map), so
+          // it stays map-only rather than showing a wrong/empty table.
+          const hasTableToggle = b.chart === "PopulationMap" || b.chart === "CaseBurdenMap";
+          const isMapOnly = b.chart === "SiteMap";
           return (
-            <div key={i} style={{ margin: "16px 0" }}>
-              <ChartBlock chart={b.chart} props={b.props} onOpenSummary={onOpenSummary} />
+            <div key={i} style={{ margin: "16px 0", height: isMapOnly ? 480 : undefined }}>
+              {hasTableToggle ? (
+                <MapOrTable chart={b.chart} props={b.props} onOpenSummary={onOpenSummary} />
+              ) : (
+                <ChartBlock chart={b.chart} props={b.props} onOpenSummary={onOpenSummary} />
+              )}
             </div>
           );
         }
@@ -273,14 +306,16 @@ export default function App() {
       addMessage({ role: "user", q });
       scrollDown();
 
+      const liveSteps = [];
       try {
         const result = await askFast(q, (s) => {
+          liveSteps.push(s);
           setSteps((prev) => [...prev, s]);
           scrollDown();
         });
-        addMessage({ role: "bot", blocks: result.blocks });
+        addMessage({ role: "bot", blocks: result.blocks, steps: liveSteps });
       } catch (e) {
-        addMessage({ role: "bot", error: String(e) });
+        addMessage({ role: "bot", error: String(e), steps: liveSteps });
       } finally {
         setBusy(false);
         setSteps([]);
@@ -360,6 +395,7 @@ export default function App() {
                 <div className="msg bot" key={i}>
                   <div className="avatar bot">AI</div>
                   <div className="msg-body">
+                    <StepsSummary steps={m.steps} />
                     {m.error ? (
                       <div className="card error">{m.error}</div>
                     ) : (

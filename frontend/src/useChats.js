@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /* Chat list persisted in localStorage.
 
@@ -36,28 +36,40 @@ export default function useChats() {
 
   const active = chats.find((c) => c.id === activeId) || null;
 
-  const newChat = useCallback(() => setActiveId(null), []);
+  // addMessage is called twice in the same send() (user message, then the bot
+  // reply after an await) without React re-rendering in between, so it cannot
+  // rely on the `activeId` state closure to know a chat was just created by
+  // its own first call -- that closure is stale until the next render. A ref,
+  // updated synchronously right when the chat is created, is the one source
+  // both calls agree on.
+  const activeIdRef = useRef(activeId);
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
+
+  const newChat = useCallback(() => {
+    activeIdRef.current = null;
+    setActiveId(null);
+  }, []);
 
   /** Append a message, creating the chat on the first one. */
-  const addMessage = useCallback(
-    (message) => {
-      setChats((prev) => {
-        let id = activeId;
-        let next = prev;
-        if (!id || !prev.some((c) => c.id === id)) {
-          id = uid();
-          const title =
-            message.role === "user" ? (message.q || "").slice(0, 48) : "New Query";
-          next = [{ id, title, messages: [] }, ...prev];
-          setActiveId(id);
-        }
-        return next.map((c) =>
-          c.id === id ? { ...c, messages: [...c.messages, message] } : c,
-        );
-      });
-    },
-    [activeId],
-  );
+  const addMessage = useCallback((message) => {
+    setChats((prev) => {
+      let id = activeIdRef.current;
+      let next = prev;
+      if (!id || !prev.some((c) => c.id === id)) {
+        id = uid();
+        const title =
+          message.role === "user" ? (message.q || "").slice(0, 48) : "New Query";
+        next = [{ id, title, messages: [] }, ...prev];
+        activeIdRef.current = id;
+        setActiveId(id);
+      }
+      return next.map((c) =>
+        c.id === id ? { ...c, messages: [...c.messages, message] } : c,
+      );
+    });
+  }, []);
 
   const renameChat = useCallback((id, title) => {
     setChats((prev) => prev.map((c) => (c.id === id ? { ...c, title } : c)));

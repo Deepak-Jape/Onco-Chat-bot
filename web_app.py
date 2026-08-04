@@ -3820,20 +3820,7 @@ def render_search_results(tr):
                          f'{donut_chart(chart_data, title="Matches by phase", value_suffix=" trials")}'
                          f'</div>')
 
-    rows = []
-    for r in results:
-        rows.append(
-            '<div class="card">'
-            f'<div class="tag">{esc(r.get("phase"))} &middot; {esc(r.get("status"))}</div>'
-            f'<h3>{esc(r.get("nct_id"))}</h3>'
-            f'<p class="title">{esc(r.get("title"))}</p>'
-            f'<div class="grid">'
-            f'<div><span class="lbl">Sponsor</span>{esc(r.get("sponsor"))}</div>'
-            f'<div><span class="lbl">Enrollment</span>{esc(r.get("enrollment"))}</div>'
-            f'<div><span class="lbl">Start</span>{esc(r.get("start_date"))}</div>'
-            f'</div></div>'
-        )
-    return head + chart_html + "".join(rows)
+    return head + chart_html
 
 
 def render_compare_arms(tr):
@@ -4421,6 +4408,28 @@ def smalltalk_reply(q):
     return None
 
 
+def _replace_csv_with_full_rows(html: str, full_rows: list) -> str:
+    """Swap the auto-embedded Download CSV data (built from only the visible
+    page of a "show all" trial list) for one covering every matching trial, so
+    the export isn't silently capped at whatever page happened to be on screen."""
+    if not full_rows or "data-csv=" not in html:
+        return html
+    import base64
+
+    def cell(x):
+        return '"' + str(x if x is not None else "").replace('"', '""') + '"'
+
+    header = ["#", "NCT ID", "Trial", "Phase", "Status", "Sponsor", "Enrollment"]
+    csv_lines = [",".join(cell(h) for h in header)]
+    for i, r in enumerate(full_rows, start=1):
+        csv_lines.append(",".join(cell(v) for v in (
+            i, r.get("nct_id") or "—", (r.get("title") or "")[:80], r.get("phase") or "—",
+            r.get("status") or "—", r.get("sponsor") or "—", r.get("enrollment") or "—",
+        )))
+    b64 = base64.b64encode("\n".join(csv_lines).encode("utf-8")).decode("ascii")
+    return re.sub(r'data-csv="[^"]*"', f'data-csv="{b64}"', html, count=1)
+
+
 def render_answer(resp, question=""):
     mode = resp.get("response_mode")
     intent = resp.get("intent")
@@ -4480,6 +4489,9 @@ def render_answer(resp, question=""):
         return banner + syn + table_html
 
     synthesis_html = render_synthesis(resp.get("synthesis"))
+    full_rows = (resp.get("synthesis") or {}).get("full_rows")
+    if full_rows:
+        synthesis_html = _replace_csv_with_full_rows(synthesis_html, full_rows)
 
     if tool == "text_to_sql":
         # LLM-written-SQL fallback: show the phrased answer, an auto-chart if the rows

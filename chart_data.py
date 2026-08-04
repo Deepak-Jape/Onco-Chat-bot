@@ -90,11 +90,23 @@ CHART_SPECS = {
         "enabled": True,
     },
     "PopulationMap": {
-        "label": "Population / case-volume density map",
+        "label": "Trial site density map (by country/region)",
         "use_when": (
-            "the question is about PATIENT or CASE VOLUMES, epidemiology, "
-            "incidence, addressable population, or comparing countries/markets "
-            "(e.g. 'annual new cancer cases in the US, China and Germany')"
+            "the question asks where trial SITES are concentrated geographically, "
+            "or wants a density/heatmap view of trial site distribution across "
+            "countries or regions -- NOT for real cancer case counts/incidence, "
+            "see CaseBurdenMap for that"
+        ),
+        "enabled": True,
+    },
+    "CaseBurdenMap": {
+        "label": "Cancer case burden map (by country/city)",
+        "use_when": (
+            "the question asks about real cancer incidence, new/annual cancer "
+            "case counts, case burden, or population/case-ratio by country or "
+            "city (e.g. 'new cancer cases in Germany', 'case burden by country', "
+            "'population density of cities in Australia') -- backed by real "
+            "epidemiology data (map_view_population), NOT trial site locations"
         ),
         "enabled": True,
     },
@@ -308,10 +320,25 @@ def build_km_curve(oncosuite_ids: list):
     return None
 
 
-def build_population_map(oncosuite_ids: list):
-    """Props for ctsearch's MapView -- see map_data.build_map_points."""
+def build_population_map(oncosuite_ids: list, question: str = ""):
+    """Props for ctsearch's MapView -- see map_data.build_map_points.
+
+    Zooms to a single country's cities when the question names one (e.g.
+    "show trials in Germany"), otherwise the global country-density view.
+    """
     from map_data import build_map_points
-    return build_map_points(oncosuite_ids or None)
+    return build_map_points(oncosuite_ids or None, question=question)
+
+
+def build_case_burden_map(oncosuite_ids: list, question: str = ""):
+    """Props for ctsearch's MapView -- REAL cancer case-burden data (annual
+    new cases, population, density) from oncosuite_gold.map_view_population,
+    as opposed to build_population_map's trial-site density. `oncosuite_ids`
+    is accepted for signature parity with the other chart builders but unused
+    -- this map answers a geography question, not a trial-scoped one.
+    See map_data.build_case_burden_map."""
+    from map_data import build_case_burden_map as _build
+    return _build(question=question)
 
 
 def _analytics(fn_name):
@@ -365,6 +392,7 @@ def build_efficacy_safety_scatter(oncosuite_ids: list, question: str = ""):
 BUILDERS = {
     "EndpointsTable": build_endpoints_table,
     "PopulationMap": build_population_map,
+    "CaseBurdenMap": build_case_burden_map,
     "SiteMap": build_site_map,
     "KMCurve": build_km_curve,
     # analytics schema

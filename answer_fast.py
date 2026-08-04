@@ -121,6 +121,72 @@ def detect_analytics(question: str):
     return None
 
 
+# Map questions have an unambiguous keyword signal ("map", "where are the
+# sites", ...), so route them the same deterministic way as the analytics
+# cues above rather than spending the LLM chart-pick call on them.
+_EPIDEMIOLOGY_CUES = (
+    r"case volume", r"cancer case", r"\bepidemiolog", r"\bincidence\b",
+    r"annual new case", r"new cancer case", r"addressable population",
+)
+
+_MAP_CUES = (
+    # Checked before SiteMap: "site density map" etc. would otherwise match
+    # SiteMap's broader "site...map" pattern first. PopulationMap answers
+    # trial-SITE density-by-country/region; SiteMap answers "where are the
+    # individual sites" -- keep the cues on the word that distinguishes them.
+    ("PopulationMap", (
+        r"density.*\bmap\b", r"\bmap\b.*density",
+        r"\bconcentrat(ion|ed)\b.*\b(site|trial)", r"\b(site|trial).*\bconcentrat",
+        r"distribution.*(site|trial).*countr", r"(site|trial).*distribution.*countr",
+        r"density by countr", r"by countr.*density",
+    )),
+    # Epidemiology / case-volume phrasing IS backed by real data now
+    # (oncosuite_gold.map_view_population) -- route it to CaseBurdenMap, not
+    # the trial-site PopulationMap. Listed as its own entry (not folded into
+    # _EPIDEMIOLOGY_CUES's tuple directly) so this stays the single source of
+    # truth for the map-cue -> chart-name mapping.
+    ("CaseBurdenMap", _EPIDEMIOLOGY_CUES),
+    ("SiteMap", (
+        r"\bsite(s)?\b.*\bmap\b", r"\bmap\b.*\bsite(s)?\b", r"\bmap view\b",
+        r"where\s+(are|is).*(sites?|facilit(y|ies))",
+        r"(sites?|facilit(y|ies)).*\b(located|running)\b",
+        r"(sites?|facilit(y|ies)).*\blocat",
+    )),
+)
+
+
+def detect_map_chart(question: str):
+    """Map chart name for this question, or None."""
+    q = (question or "").lower()
+
+    # Checked first: a named country + "map" ("show me the map for China and
+    # its trial sites") is a stronger, more specific signal than SiteMap's
+    # generic "map...site(s)" pattern below, which would otherwise catch
+    # phrasings like this too (it only means "sites" appears somewhere after
+    # "map", not that a whole-country drill-down was intended). Epidemiology
+    # phrasing is checked by the loop below (CaseBurdenMap), so this default
+    # to PopulationMap only applies to a bare "map" + country with no other cue.
+    if re.search(r"\bmap\b", q) and not is_epidemiology_question(q):
+        from map_data import _country_in_question
+        if _country_in_question(question):
+            return "PopulationMap"
+
+    for name, patterns in _MAP_CUES:
+        if any(re.search(p, q) for p in patterns):
+            return name
+    return None
+
+
+def is_epidemiology_question(question: str) -> bool:
+    """True if the question asks for real case-volume/incidence numbers --
+    now backed by real data (oncosuite_gold.map_view_population, routed to
+    CaseBurdenMap). Kept as a helper for any caller that still wants to detect
+    this phrasing (e.g. to caveat PopulationMap if the LLM fallback ever picks
+    it for an epidemiology-flavored question instead)."""
+    q = (question or "").lower()
+    return any(re.search(p, q) for p in _EPIDEMIOLOGY_CUES)
+
+
 def detect_dashboard(question: str):
     """Modality for a cohort-landscape question, or None."""
     q = (question or "").lower()
@@ -176,7 +242,6 @@ def build_fast_answer(question: str, tool_result: dict, oncosuite_ids: list,
     # deferring to its result would lose the answer entirely.
     analytics_chart = detect_analytics(question)
     if analytics_chart:
-        from chart_data import build_chart
         props = build_chart(analytics_chart, oncosuite_ids or [], question=question)
         if props:
             # Each chart names its payload differently: liveData (scatter, per
@@ -266,12 +331,12 @@ def build_fast_answer(question: str, tool_result: dict, oncosuite_ids: list,
     if insights:
         blocks.append({"type": "insights", "title": "Key Insights", "items": insights})
 
-    total = None
-    if isinstance(tool_result, dict):
-        total = tool_result.get("total_matches")
-        if total is None:
-            rows = tool_result.get("results") or tool_result.get("rows") or []
-            total = len(rows) if rows else None
+    # "Found N matching trial(s)" only makes sense for an actual trial search
+    # (search_trials/search_cohorts, which report total_matches). A generic
+    # SQL/other-table answer (e.g. text-to-SQL over map_view_population) still
+    # has `rows`, but they are not trials -- and the html block above already
+    # states that answer, so skip this line rather than mislabel the rows.
+    total = tool_result.get("total_matches") if isinstance(tool_result, dict) else None
 
     # Lead line: stated directly from the query result, never written by a model.
     if total is not None:
@@ -281,15 +346,34 @@ def build_fast_answer(question: str, tool_result: dict, oncosuite_ids: list,
             text += f"; showing {_fmt_count(shown)}"
         blocks.append({"type": "summary", "text": text + "."})
 
+    # Map/geography charts (PopulationMap, CaseBurdenMap, SiteMap) answer
+    # database-wide questions and don't need a matched trial id list -- do NOT
+    # gate detection behind `oncosuite_ids`, or every geography question with
+    # zero matched trials (the normal case) silently gets no chart at all.
     t_select = time.time()
-    names = select_charts(question) if oncosuite_ids else []
+    map_chart = detect_map_chart(question)
+    if map_chart:
+        names = [map_chart]
+    else:
+        names = select_charts(question)
     t_select = time.time() - t_select
 
     t_build = time.time()
     for name in names:
-        props = build_chart(name, oncosuite_ids)
+        props = build_chart(name, oncosuite_ids, question=question)
         if props:
             blocks.append({"type": "chart", "chart": name, "props": props})
+            if name == "PopulationMap" and is_epidemiology_question(question):
+                blocks.append({
+                    "type": "note",
+                    "title": "Shown as a proxy — not real epidemiology data",
+                    "items": [
+                        "This map shows trial-site density, not real epidemiological "
+                        "case-volume data -- oncosuite_gold has no incidence/case-count "
+                        "table. Numbers reflect where trial sites are concentrated, not "
+                        "actual patient case volumes.",
+                    ],
+                })
     t_build = time.time() - t_build
 
     return {

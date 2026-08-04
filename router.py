@@ -1134,7 +1134,16 @@ def _render_trial_page(results, offset, shown_upto, total, filters):
                      f"Say **\"show more\"** for the next {nxt} trials._")
     else:
         lines.append(f"_That's all {total} trials._")
-    return {"text": "\n".join(lines), "mode": "deterministic", "table_data": results}
+
+    # The rendered table only carries this page, but Download CSV should cover
+    # every matching trial -- fetch the rest so the export isn't silently
+    # truncated to whatever happened to be on screen.
+    full_rows = results
+    if total > len(results):
+        full_rows = search_trials(**{**filters, "limit": total, "offset": 0}).get("results") or results
+
+    return {"text": "\n".join(lines), "mode": "deterministic",
+            "table_data": results, "full_rows": full_rows}
 
 
 def _record_answer(session_id, synthesis):
@@ -1205,7 +1214,7 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
 
     classification = classify_and_extract(user_message, working_set)
     intent = classification["intent"]
-    _step(f"Classified as: {intent.replace('_', ' ')}")
+    _step(f"Classified your question as a {intent.replace('_', ' ')}")
 
     # GUARDRAIL: honor sponsor exclusions ("not interested in academia"). Inject the
     # exclusion into the filters so it flows into search_trials/landscape via dispatch.

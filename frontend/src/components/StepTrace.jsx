@@ -1,3 +1,5 @@
+import diamondIcon from "@ct/assets/Container_margin.svg";
+
 /* Live "Analyzing your query..." trace.
 
    Typography is pinned to the Figma spec: every line is 14px / 20px / weight
@@ -9,6 +11,7 @@
 const HEAD = {
   fontSize: 14, lineHeight: "20px", fontWeight: 500,
   color: "rgba(0,0,0,0.65)", margin: "0 0 12px",
+  display: "flex", alignItems: "center", gap: 8,
 };
 
 function splitStep(text) {
@@ -19,7 +22,10 @@ function splitStep(text) {
 export default function StepTrace({ steps = [] }) {
   return (
     <div>
-      <div style={HEAD}>Analyzing your query...</div>
+      <div style={HEAD}>
+        <img src={diamondIcon} alt="" width={16} height={16} className="trace-diamond-icon spin" />
+        Analyzing your query...
+      </div>
       <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
         {steps.map((s, i) => {
           const { title, sub } = splitStep(s);

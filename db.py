@@ -21,7 +21,7 @@ import psycopg2.extras
 
 DSN = os.environ.get(
     "ONCOSUITE_DSN",
-    "host=127.0.0.1 dbname=oncosuite_new user=postgres password=Deepak@2309",
+    "host=127.0.0.1 dbname=onsuite_db user=postgres password=Capital@123#",
 )
 
 # One connection per thread (psycopg2 connections aren't thread-safe to share).

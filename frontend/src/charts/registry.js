@@ -144,11 +144,30 @@ export const REGISTRY = {
 
   PopulationMap: {
     // ctsearch's full choropleth map (density bands, legend, hover cards).
+    // Data behind this chart is trial-SITE density from facility_info, NOT
+    // real cancer incidence -- chart_data.py passes legendTitle/totalLabel
+    // overrides so the UI states this honestly. See CaseBurdenMap for the
+    // real-epidemiology version of this same component.
     component: lazy(() => import("@ct/components/MapView")),
-    label: "Population / case-volume density map",
+    label: "Trial site density map (by country/region)",
     useWhen:
-      "the question is about patient or case volumes, epidemiology, incidence, " +
-      "addressable population, or comparing countries/markets",
+      "the question asks where trial sites are concentrated geographically, " +
+      "or wants a density/heatmap view of site distribution across countries",
+    requires: ["data"],
+    enabled: true,
+  },
+
+  CaseBurdenMap: {
+    // Same MapView component as PopulationMap, but fed real epidemiology
+    // data (annual new cancer cases, population, density by country/city)
+    // from oncosuite_gold.map_view_population -- see map_data.py's
+    // build_case_burden_map. legendTitle/totalLabel are set server-side to
+    // "New cancer cases" / "cases per year" since this data is real.
+    component: lazy(() => import("@ct/components/MapView")),
+    label: "Cancer case burden map (by country/city)",
+    useWhen:
+      "the question asks about real cancer incidence, new/annual cancer " +
+      "case counts, case burden, or population/case-ratio by country or city",
     requires: ["data"],
     enabled: true,
   },

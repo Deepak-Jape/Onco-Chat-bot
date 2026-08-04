@@ -39,6 +39,7 @@ function Dots() {
 
 function ChatRow({ chat, active, onSelect, onPin, onRename, onDelete }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(chat.title || "");
   const inputRef = useRef(null);
@@ -50,7 +51,10 @@ function ChatRow({ chat, active, onSelect, onPin, onRename, onDelete }) {
   // Close the popup on any outside click.
   useEffect(() => {
     if (!menuOpen) return undefined;
-    const close = () => setMenuOpen(false);
+    const close = () => {
+      setMenuOpen(false);
+      setConfirmDelete(false);
+    };
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [menuOpen]);
@@ -97,6 +101,7 @@ function ChatRow({ chat, active, onSelect, onPin, onRename, onDelete }) {
         title="More"
         onClick={(e) => {
           e.stopPropagation();
+          setConfirmDelete(false);
           setMenuOpen((v) => !v);
         }}
       >
@@ -105,26 +110,39 @@ function ChatRow({ chat, active, onSelect, onPin, onRename, onDelete }) {
 
       {menuOpen ? (
         <div className="ci-pop" onClick={(e) => e.stopPropagation()}>
-          <button type="button" onClick={() => { setMenuOpen(false); onPin(); }}>
-            <Svg d={ICON.pin} />
-            {chat.pinned ? "Unpin chat" : "Pin chat"}
-          </button>
-          <button type="button" onClick={() => { setMenuOpen(false); setEditing(true); }}>
-            <Svg d={ICON.pencil} />
-            Rename
-          </button>
-          <div className="sep" />
-          <button
-            type="button"
-            className="danger"
-            onClick={() => {
-              setMenuOpen(false);
-              if (window.confirm(`Delete "${chat.title || "this chat"}"?`)) onDelete();
-            }}
-          >
-            <Svg d={ICON.trash} />
-            Delete
-          </button>
+          {confirmDelete ? (
+            <div className="ci-confirm">
+              <p>Are you sure you want to delete this chat?</p>
+              <div className="ci-confirm-actions">
+                <button type="button" onClick={() => setConfirmDelete(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => { setMenuOpen(false); setConfirmDelete(false); onDelete(); }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <button type="button" onClick={() => { setMenuOpen(false); onPin(); }}>
+                <Svg d={ICON.pin} />
+                {chat.pinned ? "Unpin chat" : "Pin chat"}
+              </button>
+              <button type="button" onClick={() => { setMenuOpen(false); setEditing(true); }}>
+                <Svg d={ICON.pencil} />
+                Rename
+              </button>
+              <div className="sep" />
+              <button type="button" className="danger" onClick={() => setConfirmDelete(true)}>
+                <Svg d={ICON.trash} />
+                Delete
+              </button>
+            </>
+          )}
         </div>
       ) : null}
     </div>
@@ -159,7 +177,7 @@ export default function Sidebar({
       <div className="sidebar-head">
         <p className="brand">Analyst</p>
         <button className="new-chat" type="button" onClick={onNew}>
-          <Svg d={ICON.plus} size={16} />
+          <span className="new-chat-icon"><Svg d={ICON.plus} size={14} /></span>
           New Query
         </button>
       </div>
@@ -173,6 +191,8 @@ export default function Sidebar({
           onChange={(e) => setTerm(e.target.value)}
         />
       </div>
+
+      <div className="sidebar-divider" />
 
       <div className="chats-label"><span>Chats</span></div>
 

@@ -76,7 +76,7 @@ export default defineConfig({
       // CJS with __esModule set but no exports.default assignment, so Vite's
       // static scan reports "does not provide an export named 'default'" even
       // though the property exists at runtime. Pre-bundling materialises it.
-      "react-world-flags",
+      "react-world-flags", "i18n-iso-countries",
       "chart.js", "react-chartjs-2", "maplibre-gl", "react-map-gl/maplibre",
     ],
   },

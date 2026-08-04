@@ -321,7 +321,8 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
     if not with_orr and not with_os:
         missing.append(
             "OS and ORR columns are empty: these trials have endpoint definitions "
-            "but no posted outcome values in the database."
+            "but no posted outcome values for this modality -- other trials in the "
+            "database do have OS/ORR values."
         )
     if not scatter:
         missing.append(

@@ -221,6 +221,34 @@ TABLES = {
             "source_link": "URL to the source",
         },
     },
+    "map_view_population": {
+        "purpose": ("Reference geo/population data: one row per city, giving that city's "
+                    "population, area, coordinates, and cancer case burden, plus its "
+                    "country's total population and annual case count. NOT trial data -- "
+                    "do not join this with trial_info/cohort_info/etc; it answers "
+                    "population/case-burden questions by country or city, e.g. "
+                    "'case ratio in Melbourne', 'top cities in Germany by case ratio', "
+                    "'population of Sydney', 'new cancer cases in Germany', 'cancer case "
+                    "density by city'. Many smaller cities have NULL case_ratio/"
+                    "city_population/city_area_km2 -- when ranking top/bottom cities by any "
+                    "of these, add NULLS LAST (DESC) or filter out NULLs, otherwise rows "
+                    "with no data will dominate the ranking."),
+        "pk": "id",
+        "columns": {
+            "id": "primary key",
+            "country": "country name, e.g. 'Australia'",
+            "country_population": "total population of the country",
+            "annual_cases": "total annual new cancer cases for the whole country (same value repeats for every city row in that country)",
+            "city": "city name",
+            "city_population": "population of this city",
+            "zipcode": "postal/zip code for this city row (cities can have multiple zipcode rows)",
+            "latitude": "city latitude",
+            "longitude": "city longitude",
+            "case_ratio": "estimated annual new cancer cases attributable to this city (city-level case count, not a percentage)",
+            "admin_name": "administrative region/state/province name for the city",
+            "city_area_km2": "city area in square kilometers; density = case_ratio / city_area_km2",
+        },
+    },
     "vocab_terms": {
         "purpose": "Controlled vocabulary: canonical values + aliases per field (used for term normalization).",
         "pk": "id",

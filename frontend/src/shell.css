@@ -18,11 +18,14 @@
  /* ---- left sidebar (chat list) ---- */
  .sidebar { width:270px; flex-shrink:0; background:#f7f9fc; border-right:1px solid #e5e9f0;
      display:flex; flex-direction:column; }
- .sidebar-head { padding:16px 16px 10px; }
- .brand { font-size:20px; font-weight:700; color:#111827; margin:0 0 16px; letter-spacing:-.01em; }
- .new-chat { display:flex; align-items:center; justify-content:center; gap:8px; width:100%; padding:10px 12px;
-     border:0; border-radius:8px; background:#2563eb; color:#fff; font-size:14px; font-weight:600; cursor:pointer; }
- .new-chat:hover { background:#1d4ed8; }
+ .sidebar-head { padding:16px 16px 14px; }
+ .brand { font-size:20px; font-weight:700; color:#111827; letter-spacing:-.01em; margin:0 0 14px; }
+ .new-chat { display:flex; align-items:center; gap:8px; width:auto; padding:0;
+     border:0; background:transparent; color:#2666be;
+     font-size:15px; line-height:20px; font-weight:500; cursor:pointer; }
+ .new-chat:hover { color:#1d4ed8; }
+ .new-chat .new-chat-icon { display:flex; align-items:center; justify-content:center; flex-shrink:0;
+     width:26px; height:26px; border-radius:50%; background:#dbeafe; color:#2666be; }
  .search-box { position:relative; margin:12px 16px 6px; }
  .search-box input { width:100%; padding:8px 12px 8px 32px; border:1px solid #e5e9f0; border-radius:8px;
      background:#fff; color:#1f2937; font-size:13px; outline:none; }
@@ -30,6 +33,7 @@
  /* display:flex so the inline SVG centres on the baseline-free box. */
  .search-box .si { position:absolute; left:11px; top:50%; transform:translateY(-50%);
      color:#9aa4b2; font-size:13px; display:flex; align-items:center; }
+ .sidebar-divider { width:200px; height:0; margin:8px auto 0; border-top:1px solid rgba(0,0,0,.05); }
  .chats-label { display:flex; align-items:center; justify-content:space-between; padding:10px 18px 4px;
      font-size:12px; font-weight:700; color:#374151; }
  /* overflow-x visible so an open ⋮ popup is not clipped sideways; the list
@@ -40,7 +44,7 @@
  .chat-item { position:relative; display:flex; align-items:center; gap:6px; padding:8px 10px; border-radius:8px;
      font-size:13px; color:#374151; cursor:pointer; margin-bottom:1px; white-space:nowrap; }
  .chat-item:hover { background:#eef2f8; }
- .chat-item.active { background:#e4ebf7; color:#1e3a8a; font-weight:600; }
+ .chat-item.active { background:#fff; color:#1f2937; box-shadow:0 1px 2px rgba(16,24,40,.08); }
  .ic { width:15px; height:15px; flex-shrink:0; display:block; }
  .chat-item .ci-pin { flex-shrink:0; color:#f59e0b; display:flex; }
  .chat-item .ci-pin .ic { width:13px; height:13px; }
@@ -57,13 +61,23 @@
     JS; here the row is the positioning context, so the offsets live in CSS. */
  .ci-pop { position:absolute; top:calc(100% - 2px); right:6px; z-index:50; min-width:150px;
      background:#fff; border:1px solid #e5e9f0; border-radius:9px;
-     box-shadow:0 6px 20px rgba(16,24,40,.14); padding:4px; font-size:13px; }
+     box-shadow:0 6px 20px rgba(16,24,40,.14); padding:4px; font-size:13px;
+     white-space:normal; }
  .ci-pop button { display:flex; align-items:center; gap:9px; width:100%; padding:7px 9px; border:0;
      background:transparent; color:#374151; font:inherit; text-align:left; border-radius:6px; cursor:pointer; }
  .ci-pop button:hover { background:#f2f5fa; }
  .ci-pop button.danger { color:#dc2626; }
  .ci-pop button.danger:hover { background:#fef2f2; }
  .ci-pop .sep { height:1px; background:#eef1f6; margin:4px 2px; }
+ /* inline delete-confirm step, swapped in place of the menu items */
+ .ci-confirm { padding:6px 7px 4px; }
+ .ci-confirm p { margin:0 0 8px; font-size:13px; color:#374151; line-height:1.4;
+     overflow-wrap:anywhere; }
+ .ci-confirm-actions { display:flex; gap:6px; }
+ .ci-confirm-actions button { flex:1; width:auto; justify-content:center; padding:6px 0;
+     border:1px solid #e5e9f0; }
+ .ci-confirm-actions button.danger { background:#dc2626; border-color:#dc2626; color:#fff; }
+ .ci-confirm-actions button.danger:hover { background:#c81e1e; }
  /* Pinned / Recent group headings. These sit inside .chat-list, not
     .chats-label, so the selector is not nested under it. */
  .cl-sub { font-size:11px; font-weight:600; color:#9aa4b2; text-transform:uppercase;
@@ -146,6 +160,10 @@
  .steps .st-sub { font-size:12px; line-height:18px; font-weight:400; color:rgba(0,0,0,0.35);
      margin-top:2px; }
  @keyframes stepin { from { opacity:0; transform:translateY(3px);} to {opacity:1;transform:none;} }
+ /* ctsearch's sparkle icon in front of "Analyzing your query..." -- spins while
+    steps are still streaming in, sits still once the trace is history. */
+ .trace-diamond-icon { flex-shrink:0; display:block; }
+ .trace-diamond-icon.spin { animation:spin 1s linear infinite; }
 
  @media (max-width: 760px) {
    .sidebar { display:none; }

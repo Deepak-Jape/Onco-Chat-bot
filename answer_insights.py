@@ -54,15 +54,23 @@ def build_intro(question, tool_result, rows=None):
     total = (tool_result or {}).get("total_matches") or len(rows)
     shown = len(rows)
 
+    # A tool_result with a "sql" key (and no total_matches) came from the generic
+    # text-to-SQL path, which can query ANY table -- not just trials. Calling
+    # those rows "trials" is wrong (e.g. a map_view_population answer about
+    # cities/countries). Use neutral wording for that case.
+    is_generic_sql = (isinstance(tool_result, dict) and "sql" in tool_result
+                      and tool_result.get("total_matches") is None)
+    noun = "row" if is_generic_sql else "trial"
+
     phases = _tally(rows, "phase")
     statuses = _tally(rows, "status")
     years = _years(rows)
 
     bits = []
     if total > shown:
-        bits.append(f"Found **{total:,}** matching trials; showing the first **{shown}**")
+        bits.append(f"Found **{total:,}** matching {noun}s; showing the first **{shown}**")
     else:
-        bits.append(f"Found **{total:,}** matching trial(s)")
+        bits.append(f"Found **{total:,}** matching {noun}(s)")
 
     if phases:
         top = max(phases.items(), key=lambda kv: kv[1])

@@ -86,7 +86,7 @@ def build_chart_blocks(question: str, oncosuite_ids: list) -> list:
     # empty id list is not a reason to skip chart selection outright.
     blocks = []
     for name in select_charts(question):
-        props = build_chart(name, oncosuite_ids)
+        props = build_chart(name, oncosuite_ids, question=question)
         if props:
             blocks.append({"type": "chart", "chart": name, "props": props})
     return blocks
