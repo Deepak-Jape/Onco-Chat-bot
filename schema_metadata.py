@@ -236,7 +236,9 @@ TABLES = {
         "pk": "id",
         "columns": {
             "id": "primary key",
-            "country": "country name, e.g. 'Australia'",
+            "country": "country name -- do NOT default to any particular "
+                       "country when none is named in the question; query "
+                       "unfiltered across all countries instead",
             "country_population": "total population of the country",
             "annual_cases": "total annual new cancer cases for the whole country (same value repeats for every city row in that country)",
             "city": "city name",

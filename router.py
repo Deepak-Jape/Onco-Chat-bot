@@ -1,651 +1,3 @@
-# # # """
-# # # Piece 5 -- router: intent classification + escalation logic + orchestration.
-
-# # # IMPORTANT: `classify_and_extract` below is a PLACEHOLDER. In production this is
-# # # a single Claude tool-use call (the "cheap model" slot) with the tool schema
-# # # shown in CLASSIFY_TOOL_SCHEMA. This sandbox has no wired API credentials, so
-# # # a small rule-based stand-in fills the same contract (same input, same output
-# # # shape) purely so the rest of the pipeline -- escalation, memory, tool dispatch --
-# # # can be built and tested end-to-end. Swap classify_and_extract's body for a
-# # # real `anthropic.Anthropic().messages.create(...)` call using CLASSIFY_TOOL_SCHEMA
-# # # as the tool definition; nothing else in this file needs to change.
-
-# # # Escalation rules are deterministic code, NOT a model decision, per Doc 05 --
-# # # implemented exactly as specified, in priority order.
-# # # """
-# # # import re
-
-# # # from memory import SessionStore
-# # # from tools.search_trials import search_trials
-# # # from tools.get_trial_detail import get_trial_detail
-# # # from tools.get_endpoints_and_outcomes import get_endpoints_and_outcomes
-# # # from tools.get_hazard_ratios import get_hazard_ratios
-# # # from tools.get_adverse_events import get_adverse_events
-# # # from tools.compare_arms import compare_arms
-# # # from tools.get_competitive_landscape import get_competitive_landscape
-# # # from tools.get_trial_sources import get_trial_sources
-
-# # # CLASSIFY_TOOL_SCHEMA = {
-# # #     "name": "classify_and_extract",
-# # #     "description": "Classify user intent and extract structured filters/entity references, "
-# # #                     "resolving pronouns against the session working set in the same call.",
-# # #     "input_schema": {
-# # #         "type": "object",
-# # #         "properties": {
-# # #             "intent": {
-# # #                 "type": "string",
-# # #                 "enum": ["single_trial_lookup", "filtered_search", "arm_comparison",
-# # #                          "landscape_or_trend", "outcome_deep_dive", "clarification_needed",
-# # #                          "out_of_scope"],
-# # #             },
-# # #             "filters": {"type": "object"},
-# # #             "resolved_oncosuite_id": {"type": "string"},
-# # #             "resolved_arm_ids": {"type": "array", "items": {"type": "integer"}},
-# # #         },
-# # #         "required": ["intent"],
-# # #     },
-# # # }
-
-# # # ALWAYS_ESCALATE_INTENTS = {"arm_comparison", "landscape_or_trend"}
-# # # RESULT_SIZE_CHECK_INTENTS = {"filtered_search", "outcome_deep_dive"}
-# # # RESULT_SIZE_THRESHOLD = 3
-
-
-# # # def classify_and_extract(user_message: str, working_set: dict) -> dict:
-# # #     """PLACEHOLDER cheap-model classifier -- replace with a real Claude tool-use call."""
-# # #     msg = user_message.lower()
-
-# # #     resolved_oncosuite_id = working_set.get("active_trial_id")
-# # #     resolved_arm_ids = [a["arm_id"] for a in working_set.get("last_arms", [])]
-
-# # #     # Explicit "compare ... arms" is the one case where a named trial should still go
-# # #     # to arm comparison rather than full detail, so check it first.
-# # #     if any(w in msg for w in ["compare", "vs", "versus"]) and ("arm" in msg or resolved_arm_ids):
-# # #         return {"intent": "arm_comparison", "filters": {}, "resolved_oncosuite_id": resolved_oncosuite_id,
-# # #                 "resolved_arm_ids": resolved_arm_ids}
-
-# # #     # An explicit NCT id means the user is asking about ONE specific trial. Route it to
-# # #     # the full trial-detail view (which now carries endpoints, outcomes, hazard ratios,
-# # #     # adverse events, safety, population, contacts, ranking, summary). This must beat the
-# # #     # generic keyword rules below ("outcome", "survival", "what is", ...) -- otherwise a
-# # #     # question like "what are the outcomes for NCT03706690" gets routed to a different
-# # #     # tool / rejected as out-of-scope purely because of a keyword, ignoring the NCT id.
-# # #     if re.search(r"nct\d{8}", msg):
-# # #         m = re.search(r"nct\d{8}", msg)
-# # #         return {"intent": "single_trial_lookup", "filters": {"nct_id": m.group(0).upper()}}
-
-# # #     if any(w in msg for w in ["landscape", "trend", "how many trials", "competitive"]):
-# # #         filters = {}
-# # #         m = re.search(r"for ([a-z0-9\- ]+?)(?: in| trials|$)", msg)
-# # #         if m:
-# # #             filters["target_or_moa"] = [m.group(1).strip().upper()]
-# # #         return {"intent": "landscape_or_trend", "filters": filters}
-
-# # #     if any(w in msg for w in ["orr", "pfs", "os ", "survival", "response rate", "outcome"]):
-# # #         return {"intent": "outcome_deep_dive", "filters": {}, "resolved_oncosuite_id": resolved_oncosuite_id}
-
-# # #     if any(w in msg for w in ["what does", "what is", "define", "mechanism of"]) and "trial" not in msg:
-# # #         return {"intent": "out_of_scope", "filters": {}}
-
-# # #     filters = {}
-# # #     if "nsclc" in msg or "lung" in msg:
-# # #         filters["condition"] = ["NSCLC"]
-# # #     known_biomarkers = ["kras", "egfr", "alk", "ros1"]
-# # #     for bm in known_biomarkers:
-# # #         if bm in msg:
-# # #             filters.setdefault("biomarkers", []).append(bm.upper())
-# # #     if "biomarkers" not in filters:
-# # #         # naive fallback: "trials for <term>" with an unrecognized term -- pass it through
-# # #         # as a literal biomarker filter so the vocab layer's unmatched-term path actually
-# # #         # gets exercised, rather than silently dropping terms the keyword list doesn't know.
-# # #         m = re.search(r"trials? for ([a-z0-9\-]+)", msg)
-# # #         if m and m.group(1) not in known_biomarkers:
-# # #             filters["biomarkers"] = [m.group(1)]
-# # #     if "phase 3" in msg:
-# # #         filters["phase"] = ["Phase 3"]
-# # #     if "recruiting" in msg:
-# # #         filters["study_status"] = ["Recruiting"]
-
-# # #     return {"intent": "filtered_search", "filters": filters, "resolved_oncosuite_id": resolved_oncosuite_id}
-
-
-# # # def should_escalate(intent, tool_result, unmatched_terms):
-# # #     """Deterministic escalation logic -- real code, per Doc 05, in priority order."""
-# # #     if unmatched_terms:
-# # #         return False
-# # #     if intent in ALWAYS_ESCALATE_INTENTS:
-# # #         return True
-# # #     if intent in RESULT_SIZE_CHECK_INTENTS:
-# # #         if _count_distinct_trials(tool_result) > RESULT_SIZE_THRESHOLD:
-# # #             return True
-# # #     return False
-
-
-# # # def _count_distinct_trials(tool_result):
-# # #     if isinstance(tool_result, dict) and "results" in tool_result:
-# # #         return len({r["oncosuite_id"] for r in tool_result["results"]})
-# # #     return 0
-
-
-# # # _sessions = SessionStore()
-
-
-# # # def handle_turn(session_id: str, user_message: str) -> dict:
-# # #     working_set = _sessions.get(session_id)
-# # #     classification = classify_and_extract(user_message, working_set)
-# # #     intent = classification["intent"]
-
-# # #     if intent == "out_of_scope":
-# # #         return {
-# # #             "intent": intent,
-# # #             "escalate": False,
-# # #             "response_mode": "out_of_scope_policy_needed",
-# # #             "note": "Doc 05 flags this as a product decision, not resolved here.",
-# # #         }
-
-# # #     tool_name, tool_result = _dispatch_tool(classification, working_set)
-# # #     unmatched_terms = tool_result.get("unmatched_terms", []) if isinstance(tool_result, dict) else []
-
-# # #     if unmatched_terms:
-# # #         return {
-# # #             "intent": intent, "escalate": False, "response_mode": "clarification_needed",
-# # #             "unmatched_terms": unmatched_terms, "tool_name": tool_name,
-# # #         }
-
-# # #     escalate = should_escalate(intent, tool_result, unmatched_terms)
-# # #     _sessions.update_after_tool_call(session_id, tool_name, tool_result)
-
-# # #     return {
-# # #         "intent": intent, "tool_name": tool_name, "tool_result": tool_result,
-# # #         "escalate": escalate,
-# # #         "response_mode": "strong_model_synthesis" if escalate else "cheap_model_format",
-# # #     }
-
-
-# # # def _dispatch_tool(classification, working_set):
-# # #     intent = classification["intent"]
-# # #     filters = classification.get("filters", {})
-# # #     oncosuite_id = classification.get("resolved_oncosuite_id")
-# # #     arm_ids = classification.get("resolved_arm_ids")
-
-# # #     if intent == "filtered_search":
-# # #         return "search_trials", search_trials(**{k: v for k, v in filters.items() if k != "nct_id"})
-
-# # #     if intent == "single_trial_lookup":
-# # #         nct_id = filters.get("nct_id")
-# # #         if nct_id:
-# # #             from db import query
-# # #             rows = query(
-# # #                 "SELECT oncosuite_id FROM oncosuite_gold.source_mapping "
-# # #                 "WHERE source_name = 'clinicaltrials.gov' AND source_unique_id = %(nct)s",
-# # #                 {"nct": nct_id},
-# # #             )
-# # #             if rows:
-# # #                 return "get_trial_detail", get_trial_detail(rows[0]["oncosuite_id"])
-# # #             return "get_trial_detail", {"error": f"no trial found for NCT id {nct_id}"}
-# # #         if oncosuite_id:
-# # #             return "get_trial_detail", get_trial_detail(oncosuite_id)
-# # #         return "search_trials", search_trials(**{k: v for k, v in filters.items() if k != "nct_id"})
-
-# # #     if intent == "arm_comparison":
-# # #         if oncosuite_id and arm_ids:
-# # #             return "compare_arms", compare_arms(oncosuite_id, arm_ids)
-# # #         return "compare_arms", {"error": "could not resolve trial/arms from session context"}
-
-# # #     if intent == "landscape_or_trend":
-# # #         group_by = filters.get("group_by", ["drug_name", "phase"])
-# # #         return "get_competitive_landscape", get_competitive_landscape(
-# # #             group_by=group_by,
-# # #             condition=filters.get("condition"),
-# # #             target_or_moa=filters.get("target_or_moa"),
-# # #             outcome_metric=filters.get("outcome_metric"),
-# # #         )
-
-# # #     if intent == "outcome_deep_dive":
-# # #         if oncosuite_id:
-# # #             return "get_endpoints_and_outcomes", get_endpoints_and_outcomes(oncosuite_id)
-# # #         return "get_endpoints_and_outcomes", {"error": "could not resolve trial from session context"}
-
-# # #     return "unknown", {"error": f"unhandled intent: {intent}"}
-# # """
-# # Piece 5 -- router: intent classification + escalation logic + orchestration.
-
-# # IMPORTANT: `classify_and_extract` below is a PLACEHOLDER. In production this is
-# # a single Claude tool-use call (the "cheap model" slot) with the tool schema
-# # shown in CLASSIFY_TOOL_SCHEMA. This sandbox has no wired API credentials, so
-# # a small rule-based stand-in fills the same contract (same input, same output
-# # shape) purely so the rest of the pipeline -- escalation, memory, tool dispatch --
-# # can be built and tested end-to-end. Swap classify_and_extract's body for a
-# # real `anthropic.Anthropic().messages.create(...)` call using CLASSIFY_TOOL_SCHEMA
-# # as the tool definition; nothing else in this file needs to change.
-
-# # Escalation rules are deterministic code, NOT a model decision, per Doc 05 --
-# # implemented exactly as specified, in priority order.
-# # """
-# # import re
-
-# # from memory import SessionStore
-# # from tools.search_trials import search_trials
-# # from tools.get_trial_detail import get_trial_detail
-# # from tools.get_endpoints_and_outcomes import get_endpoints_and_outcomes
-# # from tools.get_hazard_ratios import get_hazard_ratios
-# # from tools.get_adverse_events import get_adverse_events
-# # from tools.compare_arms import compare_arms
-# # from tools.get_competitive_landscape import get_competitive_landscape
-# # from tools.get_trial_sources import get_trial_sources
-
-# # CLASSIFY_TOOL_SCHEMA = {
-# #     "name": "classify_and_extract",
-# #     "description": "Classify user intent and extract structured filters/entity references, "
-# #                     "resolving pronouns against the session working set in the same call.",
-# #     "input_schema": {
-# #         "type": "object",
-# #         "properties": {
-# #             "intent": {
-# #                 "type": "string",
-# #                 "enum": ["single_trial_lookup", "filtered_search", "arm_comparison",
-# #                          "landscape_or_trend", "outcome_deep_dive", "clarification_needed",
-# #                          "out_of_scope"],
-# #             },
-# #             "filters": {"type": "object"},
-# #             "resolved_oncosuite_id": {"type": "string"},
-# #             "resolved_arm_ids": {"type": "array", "items": {"type": "integer"}},
-# #         },
-# #         "required": ["intent"],
-# #     },
-# # }
-
-# # ALWAYS_ESCALATE_INTENTS = {"arm_comparison", "landscape_or_trend"}
-# # RESULT_SIZE_CHECK_INTENTS = {"filtered_search", "outcome_deep_dive"}
-# # RESULT_SIZE_THRESHOLD = 3
-
-
-# # def classify_and_extract(user_message: str, working_set: dict) -> dict:
-# #     """PLACEHOLDER cheap-model classifier -- replace with a real Claude tool-use call."""
-# #     msg = user_message.lower()
-
-# #     resolved_oncosuite_id = working_set.get("active_trial_id")
-# #     resolved_arm_ids = [a["arm_id"] for a in working_set.get("last_arms", [])]
-
-# #     # Explicit "compare ... arms" is the one case where a named trial should still go
-# #     # to arm comparison rather than full detail, so check it first.
-# #     if any(w in msg for w in ["compare", "vs", "versus"]) and ("arm" in msg or resolved_arm_ids):
-# #         return {"intent": "arm_comparison", "filters": {}, "resolved_oncosuite_id": resolved_oncosuite_id,
-# #                 "resolved_arm_ids": resolved_arm_ids}
-
-# #     # An explicit NCT id means the user is asking about ONE specific trial. Route it to
-# #     # the full trial-detail view (which now carries endpoints, outcomes, hazard ratios,
-# #     # adverse events, safety, population, contacts, ranking, summary). This must beat the
-# #     # generic keyword rules below ("outcome", "survival", "what is", ...) -- otherwise a
-# #     # question like "what are the outcomes for NCT03706690" gets routed to a different
-# #     # tool / rejected as out-of-scope purely because of a keyword, ignoring the NCT id.
-# #     if re.search(r"nct\d{8}", msg):
-# #         m = re.search(r"nct\d{8}", msg)
-# #         return {"intent": "single_trial_lookup", "filters": {"nct_id": m.group(0).upper()}}
-
-# #     if any(w in msg for w in ["landscape", "trend", "how many trials", "competitive"]):
-# #         filters = {}
-# #         m = re.search(r"for ([a-z0-9\- ]+?)(?: in| trials|$)", msg)
-# #         if m:
-# #             filters["target_or_moa"] = [m.group(1).strip().upper()]
-# #         return {"intent": "landscape_or_trend", "filters": filters}
-
-# #     if any(w in msg for w in ["orr", "pfs", "os ", "survival", "response rate", "outcome"]):
-# #         return {"intent": "outcome_deep_dive", "filters": {}, "resolved_oncosuite_id": resolved_oncosuite_id}
-
-# #     if any(w in msg for w in ["what does", "what is", "define", "mechanism of"]) and "trial" not in msg:
-# #         return {"intent": "out_of_scope", "filters": {}}
-
-# #     filters = {}
-# #     if "nsclc" in msg or "lung" in msg:
-# #         filters["condition"] = ["NSCLC"]
-# #     known_biomarkers = ["kras", "egfr", "alk", "ros1"]
-# #     for bm in known_biomarkers:
-# #         if bm in msg:
-# #             filters.setdefault("biomarkers", []).append(bm.upper())
-# #     if "biomarkers" not in filters:
-# #         # naive fallback: "trials for <term>" with an unrecognized term -- pass it through
-# #         # as a literal biomarker filter so the vocab layer's unmatched-term path actually
-# #         # gets exercised, rather than silently dropping terms the keyword list doesn't know.
-# #         m = re.search(r"trials? for ([a-z0-9\-]+)", msg)
-# #         if m and m.group(1) not in known_biomarkers:
-# #             filters["biomarkers"] = [m.group(1)]
-# #     if "phase 3" in msg:
-# #         filters["phase"] = ["Phase 3"]
-# #     if "recruiting" in msg:
-# #         filters["study_status"] = ["Recruiting"]
-
-# #     return {"intent": "filtered_search", "filters": filters, "resolved_oncosuite_id": resolved_oncosuite_id}
-
-
-# # def should_escalate(intent, tool_result, unmatched_terms):
-# #     """Deterministic escalation logic -- real code, per Doc 05, in priority order."""
-# #     if unmatched_terms:
-# #         return False
-# #     if intent in ALWAYS_ESCALATE_INTENTS:
-# #         return True
-# #     if intent in RESULT_SIZE_CHECK_INTENTS:
-# #         if _count_distinct_trials(tool_result) > RESULT_SIZE_THRESHOLD:
-# #             return True
-# #     return False
-
-
-# # def _count_distinct_trials(tool_result):
-# #     if isinstance(tool_result, dict) and "results" in tool_result:
-# #         return len({r["oncosuite_id"] for r in tool_result["results"]})
-# #     return 0
-
-
-# # _sessions = SessionStore()
-
-
-# # def handle_turn(session_id: str, user_message: str) -> dict:
-# #     working_set = _sessions.get(session_id)
-# #     classification = classify_and_extract(user_message, working_set)
-# #     intent = classification["intent"]
-
-# #     if intent == "out_of_scope":
-# #         return {
-# #             "intent": intent,
-# #             "escalate": False,
-# #             "response_mode": "out_of_scope_policy_needed",
-# #             "note": "Doc 05 flags this as a product decision, not resolved here.",
-# #         }
-
-# #     tool_name, tool_result = _dispatch_tool(classification, working_set)
-# #     unmatched_terms = tool_result.get("unmatched_terms", []) if isinstance(tool_result, dict) else []
-
-# #     if unmatched_terms:
-# #         return {
-# #             "intent": intent, "escalate": False, "response_mode": "clarification_needed",
-# #             "unmatched_terms": unmatched_terms, "tool_name": tool_name,
-# #         }
-
-# #     escalate = should_escalate(intent, tool_result, unmatched_terms)
-# #     _sessions.update_after_tool_call(session_id, tool_name, tool_result)
-
-# #     filters = classification.get("filters", {})
-# #     filters_extracted = bool(filters and any(v for v in filters.values()))
-
-# #     return {
-# #         "intent": intent, "tool_name": tool_name, "tool_result": tool_result,
-# #         "escalate": escalate,
-# #         "response_mode": "strong_model_synthesis" if escalate else "cheap_model_format",
-# #         "filters_extracted": filters_extracted,
-# #     }
-
-
-# # def _dispatch_tool(classification, working_set):
-# #     intent = classification["intent"]
-# #     filters = classification.get("filters", {})
-# #     oncosuite_id = classification.get("resolved_oncosuite_id")
-# #     arm_ids = classification.get("resolved_arm_ids")
-
-# #     if intent == "filtered_search":
-# #         return "search_trials", search_trials(**{k: v for k, v in filters.items() if k != "nct_id"})
-
-# #     if intent == "single_trial_lookup":
-# #         nct_id = filters.get("nct_id")
-# #         if nct_id:
-# #             from db import query
-# #             rows = query(
-# #                 "SELECT oncosuite_id FROM oncosuite_gold.source_mapping "
-# #                 "WHERE source_name = 'clinicaltrials.gov' AND source_unique_id = %(nct)s",
-# #                 {"nct": nct_id},
-# #             )
-# #             if rows:
-# #                 return "get_trial_detail", get_trial_detail(rows[0]["oncosuite_id"])
-# #             return "get_trial_detail", {"error": f"no trial found for NCT id {nct_id}"}
-# #         if oncosuite_id:
-# #             return "get_trial_detail", get_trial_detail(oncosuite_id)
-# #         return "search_trials", search_trials(**{k: v for k, v in filters.items() if k != "nct_id"})
-
-# #     if intent == "arm_comparison":
-# #         if oncosuite_id and arm_ids:
-# #             return "compare_arms", compare_arms(oncosuite_id, arm_ids)
-# #         return "compare_arms", {"error": "could not resolve trial/arms from session context"}
-
-# #     if intent == "landscape_or_trend":
-# #         group_by = filters.get("group_by", ["drug_name", "phase"])
-# #         return "get_competitive_landscape", get_competitive_landscape(
-# #             group_by=group_by,
-# #             condition=filters.get("condition"),
-# #             target_or_moa=filters.get("target_or_moa"),
-# #             outcome_metric=filters.get("outcome_metric"),
-# #         )
-
-# #     if intent == "outcome_deep_dive":
-# #         if oncosuite_id:
-# #             return "get_endpoints_and_outcomes", get_endpoints_and_outcomes(oncosuite_id)
-# #         return "get_endpoints_and_outcomes", {"error": "could not resolve trial from session context"}
-
-# #     return "unknown", {"error": f"unhandled intent: {intent}"}
-
-
-# """
-# Piece 5 -- router: intent classification + escalation logic + orchestration.
-
-# IMPORTANT: `classify_and_extract` below is a PLACEHOLDER. In production this is
-# a single Claude tool-use call (the "cheap model" slot) with the tool schema
-# shown in CLASSIFY_TOOL_SCHEMA. This sandbox has no wired API credentials, so
-# a small rule-based stand-in fills the same contract (same input, same output
-# shape) purely so the rest of the pipeline -- escalation, memory, tool dispatch --
-# can be built and tested end-to-end. Swap classify_and_extract's body for a
-# real `anthropic.Anthropic().messages.create(...)` call using CLASSIFY_TOOL_SCHEMA
-# as the tool definition; nothing else in this file needs to change.
-
-# Escalation rules are deterministic code, NOT a model decision, per Doc 05 --
-# implemented exactly as specified, in priority order.
-# """
-# import re
-
-# from memory import SessionStore
-# from tools.search_trials import search_trials
-# from tools.get_trial_detail import get_trial_detail
-# from tools.get_endpoints_and_outcomes import get_endpoints_and_outcomes
-# from tools.get_hazard_ratios import get_hazard_ratios
-# from tools.get_adverse_events import get_adverse_events
-# from tools.compare_arms import compare_arms
-# from tools.get_competitive_landscape import get_competitive_landscape
-# from tools.get_trial_sources import get_trial_sources
-
-# CLASSIFY_TOOL_SCHEMA = {
-#     "name": "classify_and_extract",
-#     "description": "Classify user intent and extract structured filters/entity references, "
-#                     "resolving pronouns against the session working set in the same call.",
-#     "input_schema": {
-#         "type": "object",
-#         "properties": {
-#             "intent": {
-#                 "type": "string",
-#                 "enum": ["single_trial_lookup", "filtered_search", "arm_comparison",
-#                          "landscape_or_trend", "outcome_deep_dive", "clarification_needed",
-#                          "out_of_scope"],
-#             },
-#             "filters": {"type": "object"},
-#             "resolved_oncosuite_id": {"type": "string"},
-#             "resolved_arm_ids": {"type": "array", "items": {"type": "integer"}},
-#         },
-#         "required": ["intent"],
-#     },
-# }
-
-# ALWAYS_ESCALATE_INTENTS = {"arm_comparison", "landscape_or_trend"}
-# RESULT_SIZE_CHECK_INTENTS = {"filtered_search", "outcome_deep_dive"}
-# RESULT_SIZE_THRESHOLD = 3
-
-
-# def classify_and_extract(user_message: str, working_set: dict) -> dict:
-#     """PLACEHOLDER cheap-model classifier -- replace with a real Claude tool-use call."""
-#     msg = user_message.lower()
-
-#     resolved_oncosuite_id = working_set.get("active_trial_id")
-#     resolved_arm_ids = [a["arm_id"] for a in working_set.get("last_arms", [])]
-
-#     # Explicit "compare ... arms" is the one case where a named trial should still go
-#     # to arm comparison rather than full detail, so check it first.
-#     if any(w in msg for w in ["compare", "vs", "versus"]) and ("arm" in msg or resolved_arm_ids):
-#         return {"intent": "arm_comparison", "filters": {}, "resolved_oncosuite_id": resolved_oncosuite_id,
-#                 "resolved_arm_ids": resolved_arm_ids}
-
-#     # An explicit NCT id means the user is asking about ONE specific trial. Route it to
-#     # the full trial-detail view (which now carries endpoints, outcomes, hazard ratios,
-#     # adverse events, safety, population, contacts, ranking, summary). This must beat the
-#     # generic keyword rules below ("outcome", "survival", "what is", ...) -- otherwise a
-#     # question like "what are the outcomes for NCT03706690" gets routed to a different
-#     # tool / rejected as out-of-scope purely because of a keyword, ignoring the NCT id.
-#     if re.search(r"nct\d{8}", msg):
-#         m = re.search(r"nct\d{8}", msg)
-#         return {"intent": "single_trial_lookup", "filters": {"nct_id": m.group(0).upper()}}
-
-#     if any(w in msg for w in ["landscape", "trend", "how many trials", "competitive"]):
-#         filters = {}
-#         m = re.search(r"for ([a-z0-9\- ]+?)(?: in| trials|$)", msg)
-#         if m:
-#             filters["target_or_moa"] = [m.group(1).strip().upper()]
-#         return {"intent": "landscape_or_trend", "filters": filters}
-
-#     if any(w in msg for w in ["orr", "pfs", "os ", "survival", "response rate", "outcome"]):
-#         return {"intent": "outcome_deep_dive", "filters": {}, "resolved_oncosuite_id": resolved_oncosuite_id}
-
-#     if any(w in msg for w in ["what does", "what is", "define", "mechanism of"]) and "trial" not in msg:
-#         return {"intent": "out_of_scope", "filters": {}}
-
-#     filters = {}
-#     if "nsclc" in msg or "lung" in msg:
-#         filters["condition"] = ["NSCLC"]
-#     known_biomarkers = ["kras", "egfr", "alk", "ros1"]
-#     for bm in known_biomarkers:
-#         if bm in msg:
-#             filters.setdefault("biomarkers", []).append(bm.upper())
-#     if "biomarkers" not in filters:
-#         # naive fallback: "trials for <term>" with an unrecognized term -- pass it through
-#         # as a literal biomarker filter so the vocab layer's unmatched-term path actually
-#         # gets exercised, rather than silently dropping terms the keyword list doesn't know.
-#         m = re.search(r"trials? for ([a-z0-9\-]+)", msg)
-#         if m and m.group(1) not in known_biomarkers:
-#             filters["biomarkers"] = [m.group(1)]
-#     if "phase 3" in msg:
-#         filters["phase"] = ["Phase 3"]
-#     if "recruiting" in msg:
-#         filters["study_status"] = ["Recruiting"]
-
-#     return {"intent": "filtered_search", "filters": filters, "resolved_oncosuite_id": resolved_oncosuite_id}
-
-
-# def should_escalate(intent, tool_result, unmatched_terms):
-#     """Deterministic escalation logic -- real code, per Doc 05, in priority order."""
-#     if unmatched_terms:
-#         return False
-#     if intent in ALWAYS_ESCALATE_INTENTS:
-#         return True
-#     if intent in RESULT_SIZE_CHECK_INTENTS:
-#         if _count_distinct_trials(tool_result) > RESULT_SIZE_THRESHOLD:
-#             return True
-#     return False
-
-
-# def _count_distinct_trials(tool_result):
-#     if isinstance(tool_result, dict) and "results" in tool_result:
-#         return len({r["oncosuite_id"] for r in tool_result["results"]})
-#     return 0
-
-
-# _sessions = SessionStore()
-
-
-# def handle_turn(session_id: str, user_message: str) -> dict:
-#     working_set = _sessions.get(session_id)
-#     classification = classify_and_extract(user_message, working_set)
-#     intent = classification["intent"]
-
-#     if intent == "out_of_scope":
-#         return {
-#             "intent": intent,
-#             "escalate": False,
-#             "response_mode": "out_of_scope_policy_needed",
-#             "note": "Doc 05 flags this as a product decision, not resolved here.",
-#         }
-
-#     tool_name, tool_result = _dispatch_tool(classification, working_set)
-#     unmatched_terms = tool_result.get("unmatched_terms", []) if isinstance(tool_result, dict) else []
-
-#     if unmatched_terms:
-#         return {
-#             "intent": intent, "escalate": False, "response_mode": "clarification_needed",
-#             "unmatched_terms": unmatched_terms, "tool_name": tool_name,
-#         }
-
-#     escalate = should_escalate(intent, tool_result, unmatched_terms)
-#     _sessions.update_after_tool_call(session_id, tool_name, tool_result)
-
-#     filters = classification.get("filters", {})
-#     filters_extracted = bool(filters and any(v for v in filters.values()))
-
-#     synthesis = None
-#     if escalate:
-#         # NOTE: tool_result here comes ONLY from _dispatch_tool (the 8 real tools).
-#         # text_to_sql.py's LLM-written SQL path is a completely separate branch in
-#         # hybrid.py and never reaches this line -- see synthesis.py's module
-#         # docstring for the enforced invariant.
-#         from synthesis import synthesize
-#         synthesis = synthesize(user_message, intent, tool_name, tool_result)
-
-#     return {
-#         "intent": intent, "tool_name": tool_name, "tool_result": tool_result,
-#         "escalate": escalate,
-#         "response_mode": "strong_model_synthesis" if escalate else "cheap_model_format",
-#         "filters_extracted": filters_extracted,
-#         "synthesis": synthesis,
-#     }
-
-
-# def _dispatch_tool(classification, working_set):
-#     intent = classification["intent"]
-#     filters = classification.get("filters", {})
-#     oncosuite_id = classification.get("resolved_oncosuite_id")
-#     arm_ids = classification.get("resolved_arm_ids")
-
-#     if intent == "filtered_search":
-#         return "search_trials", search_trials(**{k: v for k, v in filters.items() if k != "nct_id"})
-
-#     if intent == "single_trial_lookup":
-#         nct_id = filters.get("nct_id")
-#         if nct_id:
-#             from db import query
-#             rows = query(
-#                 "SELECT oncosuite_id FROM oncosuite_gold.source_mapping "
-#                 "WHERE source_name = 'clinicaltrials.gov' AND source_unique_id = %(nct)s",
-#                 {"nct": nct_id},
-#             )
-#             if rows:
-#                 return "get_trial_detail", get_trial_detail(rows[0]["oncosuite_id"])
-#             return "get_trial_detail", {"error": f"no trial found for NCT id {nct_id}"}
-#         if oncosuite_id:
-#             return "get_trial_detail", get_trial_detail(oncosuite_id)
-#         return "search_trials", search_trials(**{k: v for k, v in filters.items() if k != "nct_id"})
-
-#     if intent == "arm_comparison":
-#         if oncosuite_id and arm_ids:
-#             return "compare_arms", compare_arms(oncosuite_id, arm_ids)
-#         return "compare_arms", {"error": "could not resolve trial/arms from session context"}
-
-#     if intent == "landscape_or_trend":
-#         group_by = filters.get("group_by", ["drug_name", "phase"])
-#         return "get_competitive_landscape", get_competitive_landscape(
-#             group_by=group_by,
-#             condition=filters.get("condition"),
-#             target_or_moa=filters.get("target_or_moa"),
-#             outcome_metric=filters.get("outcome_metric"),
-#         )
-
-#     if intent == "outcome_deep_dive":
-#         if oncosuite_id:
-#             return "get_endpoints_and_outcomes", get_endpoints_and_outcomes(oncosuite_id)
-#         return "get_endpoints_and_outcomes", {"error": "could not resolve trial from session context"}
-
-#     return "unknown", {"error": f"unhandled intent: {intent}"}
-
 
 
 """
@@ -964,42 +316,6 @@ def _vector_search_response(user_message):
     }
 
 
-def _general_knowledge_response(user_message):
-    """LAST-RESORT fallback: when the database genuinely can't answer (no matching data,
-    text-to-SQL declined), let the LLM answer from its own general knowledge -- but the
-    response is clearly flagged as AI-generated and NOT from the trial database, so it's
-    never confused with verified data. Returns a response dict or None."""
-    import llm_client
-    if not llm_client.available():
-        return None
-    # Don't answer greetings/thanks here (web_app handles small talk); only substantive
-    # questions reach this point anyway. Keep it factual and cautious.
-    system = (
-        "You are a clinical-trials domain assistant. The user's question could NOT be "
-        "answered from the trial database (the requested data isn't in it). Answer from "
-        "your own general medical/oncology knowledge instead. Be accurate and concise. "
-        "If you are not confident, say so. Do NOT invent specific trial IDs, enrollment "
-        "numbers, or results as if they came from a database -- speak in general terms. "
-        "Start your answer with a one-line note that this is general knowledge, not from "
-        "the trial dataset."
-    )
-    try:
-        text = llm_client.chat([
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_message},
-        ])
-    except Exception:
-        return None
-    if not text or not text.strip():
-        return None
-    return {
-        "intent": "general_knowledge", "tool_name": None, "escalate": True,
-        "response_mode": "general_knowledge",
-        "tool_result": {},
-        "synthesis": {"text": text, "mode": "general_knowledge"},
-    }
-
-
 def _cohort_list_response(user_message, classification, on_step=None):
     """Cohort-level answer per the client's spec: 'N cohorts within M trials' + a
     table (OncoSuite ID | Indication | Regimen | Phase | Status), clickable rows,
@@ -1046,104 +362,158 @@ def _cohort_list_response(user_message, classification, on_step=None):
     }
 
 
-PAGE_SIZE = 200  # rows returned per "show all" page
+# Rows fetched by the FIRST query, only to learn total_matches cheaply before
+# deciding whether a second, unlimited fetch is needed -- not a cap on what the
+# user sees. Nobody wants to ask "show more" in a new chat turn just to see
+# the rest of what they already asked for, and search_trials' own COUNT query
+# (and the pre-existing CSV-export fetch this replaces) already proves fetching
+# every matching row in one go is cheap enough.
+_INITIAL_FETCH = 200
 
 _SHOW_ALL_CUES = ("show all", "show me all", "list all", "list every", "all the trials",
                   "all trials", "every trial", "full list", "entire list", "show everything")
-_MORE_CUES = ("show more", "more trials", "next 200", "next page", "next batch",
-              "next set", "see more", "load more", "continue", "more results", "next")
 
 
-def _paginated_search_response(session_id, user_message, lm, classification,
-                               working_set, history, on_step=None):
-    """Handle "show all trials" and its "show more / next 200" follow-ups.
-
-    Returns a response dict (paginated page of trials) or None to let the normal
-    cascade handle the message. Uses search_trials' limit/offset + total_matches.
+def _full_search_response(session_id, filters, on_step=None):
+    """Run search_trials with `filters`, fetching EVERY matching row (not just
+    an initial sample), and return a full paginated_list response. Shared by
+    the "show all" and "same search" follow-up resolvers below.
     """
-    is_show_all = any(c in lm for c in _SHOW_ALL_CUES)
-    # A bare "next" is only a pagination request if we actually have a page open.
-    prev = working_set.get("pagination")
-    is_more = bool(prev) and any(c in lm for c in _MORE_CUES)
-    if not (is_show_all or is_more):
-        return None
-
-    filters = dict(classification.get("filters", {}) or {})
-    filters.pop("nct_id", None)
-
-    if is_more and prev:
-        # Continue the SAME search the previous page used; advance the offset.
-        filters = dict(prev.get("filters", {}))
-        offset = int(prev.get("next_offset", 0))
-    else:
-        offset = 0
-
     if on_step:
-        on_step(f"Fetching trials {offset + 1}–{offset + PAGE_SIZE} from the database")
-    tool_result = search_trials(**{**filters, "limit": PAGE_SIZE, "offset": offset})
+        on_step("Fetching matching trials from the database")
+    tool_result = search_trials(**{**filters, "limit": _INITIAL_FETCH, "offset": 0})
+    total = tool_result.get("total_matches", len(tool_result.get("results", [])))
+    if total > len(tool_result.get("results", [])):
+        # More rows exist than the first fetch sampled -- get all of them now
+        # rather than making the user ask again for what they already requested.
+        tool_result = search_trials(**{**filters, "limit": total, "offset": 0})
     results = tool_result.get("results", [])
-    total = tool_result.get("total_matches", len(results))
-    shown_upto = offset + len(results)
+
     if on_step:
         on_step(f"Found {total} trials — building the table")
 
-    # Persist the cursor so a later "show more" continues from here.
-    ws = _sessions.get(session_id)
-    if shown_upto < total:
-        ws["pagination"] = {"filters": filters, "next_offset": shown_upto, "total": total}
-    else:
-        ws.pop("pagination", None)          # exhausted -> clear so "next" stops paging
-    _sessions.set(session_id, ws)
     _sessions.update_after_tool_call(session_id, "search_trials", tool_result)
 
-    synthesis = _render_trial_page(results, offset, shown_upto, total, filters)
+    synthesis = _render_trial_page(results, total, filters)
     _record_answer(session_id, synthesis)
     return {
         "intent": "filtered_search", "tool_name": "search_trials",
         "escalate": False, "response_mode": "paginated_list",
         "tool_result": tool_result, "synthesis": synthesis,
         "filters_extracted": bool(filters),
-        "pagination": {"offset": offset, "shown_upto": shown_upto, "total": total,
-                       "has_more": shown_upto < total},
     }
 
 
-def _render_trial_page(results, offset, shown_upto, total, filters):
-    """Deterministic tabular render of one page of trials + a next-page offer.
-    No LLM needed: every value is copied straight from the tool result."""
+def _paginated_search_response(session_id, user_message, lm, classification,
+                               working_set, history, on_step=None):
+    """Handle "show all trials": fetches and returns EVERY matching trial in
+    one response. Client-side pagination (already in the UI) handles browsing
+    a large result set, so there is nothing left to page through server-side.
+
+    Returns a response dict or None to let the normal cascade handle the message.
+    """
+    if not any(c in lm for c in _SHOW_ALL_CUES):
+        return None
+    filters = dict(classification.get("filters", {}) or {})
+    filters.pop("nct_id", None)
+    return _full_search_response(session_id, filters, on_step)
+
+
+# "\s?" between "sam" and "e" tolerates the single most common typo for this
+# exact phrase -- a stray space landing mid-word ("the sam e") -- seen
+# directly in a real user message. Plain "in" substring checks would have
+# missed it entirely and left the follow-up unresolved.
+_SAME_SEARCH_CUES = (
+    r"\bthe\s+sam\s?e\b", r"\bsam\s?e\s+trials?\b", r"\bsam\s?e\s+search\b",
+    r"\bsam\s?e\s+results?\b", r"\bsam\s?e\s+set\b", r"\bthose\s+trials?\b",
+    r"\bthese\s+trials?\b", r"\bthat\s+search\b", r"\bsam\s?e\s+list\b",
+    r"\bsam\s?e\s+filters?\b",
+)
+
+
+# A bare "show in map" carries no explicit back-reference word at all (no
+# "same"/"those"/"these") -- it just asks to visualize whatever's already on
+# screen. Seen directly: this fell through every intent gate to text-to-SQL,
+# which had NO real filter to work with and copied the literal example value
+# from schema_metadata.py's "country" column doc ("e.g. 'Australia'") as if it
+# were an actual filter, producing a answer about 27 Australian localities
+# that has nothing to do with the NSCLC search the user was just looking at.
+_VISUALIZE_WORDS = r"\b(map|chart|graph|plot|visuali[sz]e)\b"
+
+
+def _same_search_response(session_id, lm, classification, working_set, on_step=None):
+    """Handle a follow-up that refers back to whatever this session last
+    searched for instead of naming its own filter -- either explicitly
+    ("show me X for the same trials", "those trials") or implicitly (a short
+    "show in map"/"map it" with no new entity of its own, i.e. the classifier
+    extracted nothing for THIS turn). Resolves against
+    working_set['last_filters'] (the exact kwargs search_trials was called
+    with -- see its own "filters_applied" return key and
+    SessionStore.update_after_tool_call) and re-runs that search LIVE, rather
+    than leaving the reference unresolved and falling through to
+    out-of-scope/text-to-SQL.
+
+    Returns a response dict or None to let the normal cascade handle it (no
+    cue matched, or there's no prior search in this session to resolve to).
+    """
+    explicit = any(re.search(p, lm) for p in _SAME_SEARCH_CUES)
+    implicit = (
+        not (classification.get("filters") or {})
+        and len(lm.split()) <= 6
+        and re.search(_VISUALIZE_WORDS, lm)
+    )
+    if not (explicit or implicit):
+        return None
+    last_filters = {k: v for k, v in (working_set.get("last_filters") or {}).items() if v}
+    if not last_filters:
+        return None
+    resp = _full_search_response(session_id, last_filters, on_step)
+    # Flags this as a pure follow-up reusing an ALREADY-shown result set, so
+    # answer_fast.py can skip re-rendering the full trial table + insights
+    # (the user just saw that exact table) when the actual new content this
+    # turn asked for is a different view of the same data, e.g. a map.
+    resp["same_search_followup"] = True
+    return resp
+
+
+def _render_trial_page(results, total, filters):
+    """Deterministic tabular render of EVERY matching trial. No LLM needed:
+    every value is copied straight from the tool result."""
     if not results:
         return {"text": "**No trials matched.**\nThere are no trials for these filters.",
                 "mode": "deterministic", "table_data": []}
 
+    # Note: this text is normally wrapped by answer_fast.py's own intro +
+    # Key Insights blocks (built from the same tool_result) before the user
+    # sees it, so it doesn't need to repeat that framing itself -- this
+    # header just needs to hold up on its own if ever shown standalone.
     scope = " (filtered)" if filters else ""
-    header = (f"**Trials{scope}: showing {offset + 1}–{shown_upto} of {total}**")
+    header = f"**Every matching trial{scope}: {total} total**"
+    # "reported_outcomes" only exists when the search was filtered by
+    # search_trials' reported_outcomes param (e.g. "have OS/ORR/PFS reported")
+    # -- shown as its own column so it's visible WHICH of the requested
+    # metrics each row actually has, not just that the search was narrowed.
+    has_reported = any(r.get("reported_outcomes") for r in results)
+    cols = ["#", "NCT ID", "Trial", "Phase", "Status", "Sponsor", "Enrollment"]
+    if has_reported:
+        cols.append("Reported Outcomes")
     lines = [header, "",
-             "| # | NCT ID | Trial | Phase | Status | Sponsor | Enrollment |",
-             "|---|---|---|---|---|---|---|"]
-    for i, r in enumerate(results, start=offset + 1):
+             "| " + " | ".join(cols) + " |",
+             "|" + "---|" * len(cols)]
+    for i, r in enumerate(results, start=1):
         title = (r.get("title") or "")[:80]
-        lines.append(
+        row = (
             f"| {i} | {r.get('nct_id') or '—'} | {title} | {r.get('phase') or '—'} "
-            f"| {r.get('status') or '—'} | {r.get('sponsor') or '—'} | {r.get('enrollment') or '—'} |"
+            f"| {r.get('status') or '—'} | {r.get('sponsor') or '—'} | {r.get('enrollment') or '—'}"
         )
+        if has_reported:
+            row += f" | {r.get('reported_outcomes') or '—'}"
+        lines.append(row + " |")
     lines.append("")
-    remaining = total - shown_upto
-    if remaining > 0:
-        nxt = min(PAGE_SIZE, remaining)
-        lines.append(f"_Showing {shown_upto} of {total}. Want to explore more? "
-                     f"Say **\"show more\"** for the next {nxt} trials._")
-    else:
-        lines.append(f"_That's all {total} trials._")
-
-    # The rendered table only carries this page, but Download CSV should cover
-    # every matching trial -- fetch the rest so the export isn't silently
-    # truncated to whatever happened to be on screen.
-    full_rows = results
-    if total > len(results):
-        full_rows = search_trials(**{**filters, "limit": total, "offset": 0}).get("results") or results
+    lines.append(f"_All {total} matching trial(s)._")
 
     return {"text": "\n".join(lines), "mode": "deterministic",
-            "table_data": results, "full_rows": full_rows}
+            "table_data": results, "full_rows": results}
 
 
 def _record_answer(session_id, synthesis):
@@ -1222,6 +592,13 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
     if _excl:
         classification.setdefault("filters", {})["exclude_sponsor_type"] = _excl
 
+    # Same pattern: "trials that have OS/ORR/PFS reported" has no filter of its
+    # own in the classifier's vocabulary and was silently dropped -- inject it
+    # so it flows into search_trials via _dispatch_tool/_paginated_search_response.
+    _reported = detect_reported_outcomes(user_message)
+    if _reported:
+        classification.setdefault("filters", {})["reported_outcomes"] = _reported
+
     _lm = user_message.lower()
 
     # COHORT-LEVEL view (per the client's spec drawing): when the user asks for
@@ -1245,17 +622,25 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
             _record_answer(session_id, _co.get("synthesis"))
             return _co
 
-    # SHOW-ALL / PAGINATION. "show me all the trials", "list every trial", and the
-    # follow-ups "show more" / "next 200" return a large PAGE (PAGE_SIZE rows) with
-    # the true total stated and an explicit offer to fetch the next page. We page
-    # through with an offset cursor stored on the session, keyed to the active
-    # filter set so "next 200" continues the SAME search. This runs before the
-    # aggregate/RAG gates so a bare "show all trials" isn't grabbed as a no-filter
-    # question and dropped to SQL/RAG.
+    # SHOW-ALL. "show me all the trials" / "list every trial" fetches and
+    # returns EVERY matching trial in one response -- no "show more" follow-up
+    # needed, client-side pagination handles browsing. Runs before the
+    # aggregate/RAG gates so a bare "show all trials" isn't grabbed as a
+    # no-filter question and dropped to SQL/RAG.
     _pg = _paginated_search_response(session_id, user_message, _lm, classification,
                                      working_set, _history, _step)
     if _pg is not None:
         return _pg
+
+    # SAME-SEARCH FOLLOW-UP. "show me a map for the same [trials]" names no
+    # filter of its own -- without this it falls through every intent gate
+    # unresolved and dead-ends as out-of-scope, even though the session
+    # already has a search to refer back to. Checked here (same priority as
+    # show-all) so it resolves before the aggregate/RAG gates would otherwise
+    # grab it as a no-filter question.
+    _ss = _same_search_response(session_id, _lm, classification, working_set, _step)
+    if _ss is not None:
+        return _ss
 
     # LANDSCAPE / PORTFOLIO questions -> get_competitive_landscape (the tool that
     # produces the drug + phase breakdown CHARTS). This must run BEFORE the conceptual
@@ -1359,10 +744,6 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
         vs = _vector_search_response(user_message)
         if vs is not None:
             return vs
-        # Nothing in the DB at all -> last resort: AI general knowledge (flagged).
-        gk = _general_knowledge_response(user_message)
-        if gk is not None:
-            return gk
         return {
             "intent": intent, "escalate": False,
             "response_mode": "out_of_scope_policy_needed",
@@ -1379,11 +760,6 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
         vs = _vector_search_response(user_message)
         if vs is not None:
             return vs
-        # Still nothing from the DB -> answer from AI general knowledge, clearly flagged
-        # as NOT from the trial database.
-        gk = _general_knowledge_response(user_message)
-        if gk is not None:
-            return gk
         return {
             "intent": intent,
             "escalate": False,
@@ -1475,6 +851,36 @@ def detect_sponsor_exclusion(user_message: str):
     (e.g. 'not interested in academia', 'corporate sponsors only'), else None."""
     m = (user_message or "").lower()
     return "academic" if any(cue in m for cue in _EXCLUDE_ACADEMIA_CUES) else None
+
+
+# classify_and_extract's filter vocabulary (condition/biomarkers/phase/...) has
+# no concept of "has a posted outcome value" -- so a clause like "that have OS,
+# ORR, PFS reported" was silently dropped entirely, returning the exact same
+# unfiltered result as a bare condition search (seen directly: identical
+# 1,296-trial count with or without the clause). Injected the same way
+# detect_sponsor_exclusion is, right after classification.
+_OUTCOME_METRIC_ALIASES = {
+    "os": "OS", "overall survival": "OS",
+    "orr": "ORR", "objective response rate": "ORR",
+    "pfs": "PFS", "progression free survival": "PFS", "progression-free survival": "PFS",
+}
+_REPORTED_OUTCOME_CUES = ("report", "posted", "available", "with data", "has data")
+
+
+def detect_reported_outcomes(user_message: str):
+    """List of endpoint abbreviations (e.g. ["OS", "ORR", "PFS"]) the user wants
+    restricted to an actually-POSTED value for, or None. Requires BOTH a
+    "reported/posted/available" cue AND at least one named metric -- a bare
+    "PFS" mention alone (asking about PFS results generally, not filtering by
+    whether it was reported) isn't enough to imply this specific hard filter."""
+    m = (user_message or "").lower()
+    if not any(cue in m for cue in _REPORTED_OUTCOME_CUES):
+        return None
+    found = []
+    for alias, metric in _OUTCOME_METRIC_ALIASES.items():
+        if re.search(rf"\b{re.escape(alias)}\b", m) and metric not in found:
+            found.append(metric)
+    return found or None
 
 
 def _dispatch_tool(classification, working_set):

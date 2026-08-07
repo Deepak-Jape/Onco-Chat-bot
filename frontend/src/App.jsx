@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ChartBlock from "./charts/ChartBlock.jsx";
 import MapOrTable from "./charts/MapOrTable.jsx";
 import StepTrace from "./components/StepTrace.jsx";
@@ -38,7 +38,10 @@ function showPage(block, page) {
   const current = Math.min(Math.max(1, page), pages);
 
   block.querySelectorAll("tbody tr").forEach((tr) => {
-    tr.classList.toggle("pg-hidden", Number(tr.dataset.page || 1) !== current);
+    // Hidden if it's the wrong page OR it fails the active column filter(s) --
+    // the two reasons are independent, both must be checked.
+    const wrongPage = Number(tr.dataset.page || 1) !== current;
+    tr.classList.toggle("pg-hidden", wrongPage || tr.classList.contains("filter-hidden"));
   });
 
   if (!pager) return;
@@ -63,14 +66,81 @@ function applyPage(button) {
   else if (button.classList.contains("pg-num")) showPage(block, Number(button.dataset.page));
 }
 
+// Mirrors _table_pager's Python layout (web_app.py) so a filtered row count
+// gets the same "first three + gap + last" numbering as the server-rendered
+// initial state, instead of a plain 1..N list that would get unwieldy for a
+// large unfiltered table narrowed back down.
+function rebuildPagerButtons(pager, pages) {
+  const nums = pages <= 5
+    ? Array.from({ length: pages }, (_, i) => i + 1)
+    : [1, 2, 3, null, pages];
+  const html = nums
+    .map((n) => (n === null
+      ? '<span class="pg-gap">&hellip;</span>'
+      : `<button class="pg-num" data-page="${n}">${n}</button>`))
+    .join("");
+  pager.querySelectorAll(".pg-num, .pg-gap").forEach((el) => el.remove());
+  const next = pager.querySelector(".pg-next");
+  if (next) next.insertAdjacentHTML("beforebegin", html);
+}
+
+// Re-derive which rows pass every header filter on this table, renumber their
+// pages within just that visible subset (so paging counts the filtered rows,
+// not the full unfiltered set), and jump back to page 1 of the new result.
+function applyFilters(block) {
+  const size = Number(block.querySelector(".tbl-pager")?.dataset.size || 10);
+  const filterCols = Array.from(block.querySelectorAll(".th-filterable"));
+  const rows = Array.from(block.querySelectorAll("tbody tr:not(.no-match-row)"));
+
+  let visibleCount = 0;
+  rows.forEach((tr) => {
+    const passes = filterCols.every((th) => {
+      const boxes = Array.from(th.querySelectorAll(".th-filter-val"));
+      const checkedBoxes = boxes.filter((b) => b.checked);
+      if (checkedBoxes.length === boxes.length) return true; // nothing narrowed
+      const col = th.dataset.filterCol;
+      const val = tr.dataset[`f${col}`];
+      return checkedBoxes.some((b) => b.value === val);
+    });
+    tr.classList.toggle("filter-hidden", !passes);
+    if (passes) {
+      tr.dataset.page = String(Math.floor(visibleCount / size) + 1);
+      visibleCount += 1;
+    }
+  });
+
+  const pager = block.querySelector(".tbl-pager");
+  if (pager) {
+    const pages = Math.max(1, Math.ceil(visibleCount / size));
+    pager.dataset.pages = String(pages);
+    pager.dataset.total = String(visibleCount);
+    rebuildPagerButtons(pager, pages);
+  }
+  showPage(block, 1);
+
+  const empty = block.querySelector(".no-match-row");
+  if (empty) empty.classList.toggle("pg-hidden", visibleCount > 0);
+}
+
 /* Server-rendered answer HTML (trial detail, search results, landscape, ...).
 
    The markup is produced by web_app.py from this app's own database rows, not
    from user input. Collapsing paginated tables has to happen in an effect: a
    ref callback fires before React injects dangerouslySetInnerHTML, so the rows
    would not exist yet. */
-function ServerAnswer({ html, onClick }) {
+const ServerAnswer = memo(function ServerAnswer({ html, onClick }) {
   const ref = useRef(null);
+
+  // {__html: html} is a fresh object literal every render even when `html`
+  // itself hasn't changed -- React's DOM update path resets innerHTML
+  // whenever that object's reference changes, with no comparison against the
+  // previous HTML string. An unrelated state change elsewhere in the app
+  // (e.g. opening the trial-summary drawer) was enough to re-render this
+  // component and wipe out every imperative pagination/filter class showPage
+  // and applyFilters had applied, leaving all ~1300 rows of a paginated
+  // table visible at once. Memoizing on `html` keeps the object reference
+  // stable across renders that don't actually change the content.
+  const innerHtml = useMemo(() => ({ __html: html }), [html]);
 
   useEffect(() => {
     const root = ref.current;
@@ -78,15 +148,32 @@ function ServerAnswer({ html, onClick }) {
     root.querySelectorAll(".tbl-block[data-pages]").forEach((blk) => showPage(blk, 1));
   }, [html]);
 
+  // Close any open filter dropdown on a click outside it -- checkbox clicks
+  // inside the popup must NOT close it (that's how multiple values get
+  // toggled), only a click elsewhere on the page should.
+  useEffect(() => {
+    const onDocClick = (e) => {
+      const root = ref.current;
+      if (!root) return;
+      root.querySelectorAll(".th-filter-pop:not([hidden])").forEach((pop) => {
+        if (!pop.contains(e.target) && !pop.previousElementSibling?.contains(e.target)) {
+          pop.hidden = true;
+        }
+      });
+    };
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, []);
+
   return (
     <div
       ref={ref}
       className="server-answer"
       onClick={onClick}
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={innerHtml}
     />
   );
-}
+});
 
 // Efficacy-vs-Safety and Adverse Events sit side by side in the design; pair
 // them into one row when both are present.
@@ -239,22 +326,20 @@ function Answer({ blocks, onOpenSummary, onServerAnswerClick }) {
         }
 
         if (b.type === "chart") {
-          // MapView and UsHeatMap size themselves to height:"100%", which
-          // collapses to 0px (invisible, but still mounted -- tiles/data load
-          // fine, nothing ever appears) unless an ancestor gives them a real
-          // height to fill -- MapOrTable's Map View branch supplies that;
-          // Table View needs no fixed height, so it isn't set here at all.
+          // MapView sizes itself to height:"100%", which collapses to 0px
+          // (invisible, but still mounted -- tiles/data load fine, nothing
+          // ever appears) unless an ancestor gives it a real height to fill;
+          // MapOrTable's Map View branch supplies that itself, so nothing
+          // extra is needed here.
           //
-          // Only PopulationMap/CaseBurdenMap get the Table View toggle: both
-          // share the same rich per-point shape (map_data.py's
-          // build_case_burden_*), so one PanelTable column set fits both.
-          // SiteMap's points are a different, sparser shape ({longitude,
-          // latitude, name, value} -- see chart_data.py's build_site_map), so
-          // it stays map-only rather than showing a wrong/empty table.
-          const hasTableToggle = b.chart === "PopulationMap" || b.chart === "CaseBurdenMap";
-          const isMapOnly = b.chart === "SiteMap";
+          // PopulationMap/CaseBurdenMap/SiteMap all share the same rich
+          // per-point shape now (map_data.py's build_map_points /
+          // build_case_burden_*), so all three get the Table View toggle
+          // through the one shared MapOrTable/MapView pairing.
+          const hasTableToggle = b.chart === "PopulationMap" || b.chart === "CaseBurdenMap"
+            || b.chart === "SiteMap";
           return (
-            <div key={i} style={{ margin: "16px 0", height: isMapOnly ? 480 : undefined }}>
+            <div key={i} style={{ margin: "16px 0" }}>
               {hasTableToggle ? (
                 <MapOrTable chart={b.chart} props={b.props} onOpenSummary={onOpenSummary} />
               ) : (
@@ -290,9 +375,26 @@ export default function App() {
     setDrawerId(typeof row === "string" ? row : row?.oncosuite_id ?? null);
   }, []);
 
+  // Anchors the view to the TOP of the question just asked, not the bottom of
+  // the thread -- scrolling to scrollHeight put the end of a long answer (a
+  // multi-panel dashboard, a big trial table) in view, forcing the user to
+  // scroll back up just to see where their answer starts. Called after the
+  // question is added, on every streamed step, and once the full answer
+  // renders, so the user's own message stays pinned at the top throughout and
+  // the answer is always visible from its first line.
   const scrollDown = useCallback(() => {
     const el = threadRef.current;
-    if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+    if (!el) return;
+    requestAnimationFrame(() => {
+      const userMsgs = el.querySelectorAll(".msg.user");
+      const last = userMsgs[userMsgs.length - 1];
+      if (!last) {
+        el.scrollTop = el.scrollHeight;
+        return;
+      }
+      const delta = last.getBoundingClientRect().top - el.getBoundingClientRect().top;
+      el.scrollTop += delta;
+    });
   }, []);
 
   const send = useCallback(
@@ -354,6 +456,34 @@ export default function App() {
       if (pg) {
         applyPage(pg);
         return;
+      }
+
+      const filterBtn = e.target.closest?.(".th-filter-btn");
+      if (filterBtn) {
+        const pop = filterBtn.nextElementSibling;
+        const root = filterBtn.closest(".server-answer");
+        root?.querySelectorAll(".th-filter-pop").forEach((p) => {
+          if (p !== pop) p.hidden = true;
+        });
+        if (pop) pop.hidden = !pop.hidden;
+        return;
+      }
+
+      const filterBox = e.target.closest?.(".th-filter-val, .th-filter-select-all");
+      if (filterBox) {
+        const th = filterBox.closest(".th-filterable");
+        const pop = th?.querySelector(".th-filter-pop");
+        if (filterBox.classList.contains("th-filter-select-all")) {
+          const checked = filterBox.checked;
+          pop?.querySelectorAll(".th-filter-val").forEach((b) => { b.checked = checked; });
+        } else {
+          const boxes = Array.from(pop?.querySelectorAll(".th-filter-val") || []);
+          const selectAll = pop?.querySelector(".th-filter-select-all");
+          if (selectAll) selectAll.checked = boxes.every((b) => b.checked);
+        }
+        const block = th?.closest(".tbl-block");
+        if (block) applyFilters(block);
+        return; // keep the popup open -- the user may toggle more values
       }
 
       const ask = e.target.closest?.(".nextstep, .cohort-row");

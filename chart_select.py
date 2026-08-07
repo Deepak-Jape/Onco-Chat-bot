@@ -56,9 +56,19 @@ def _parse_names(raw: str, allowed: set) -> list:
     return out
 
 
+# Map charts (PopulationMap/CaseBurdenMap/SiteMap) are decided exclusively by
+# answer_fast.detect_map_chart's deterministic regex cues, checked BEFORE this
+# LLM picker ever runs -- see answer_fast.py's "map_chart = ... or
+# detect_map_chart(question)" gate. Offering them here too lets the model pick
+# a map for a question that has nothing to do with geography (seen directly:
+# "show me all nsclc trials" got SiteMap on ~1 in 5 calls, pure LLM
+# non-determinism, since nothing in that question asks where sites are).
+_MAP_CHART_NAMES = {"PopulationMap", "CaseBurdenMap", "SiteMap"}
+
+
 def select_charts(question: str, max_charts: int = 2) -> list:
     """Chart names the model wants for this question (may be empty)."""
-    specs = enabled_specs()
+    specs = {k: v for k, v in enabled_specs().items() if k not in _MAP_CHART_NAMES}
     if not specs:
         return []
     try:

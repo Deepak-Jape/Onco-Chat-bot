@@ -177,11 +177,17 @@ def _academic_exclusion_sql(param_key):
 
 def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_therapy=None,
                    prior_therapy=None, drug_name_or_target=None, phase=None, study_status=None,
-                   sponsor=None, exclude_sponsor_type=None, limit=50, offset=0):
+                   sponsor=None, exclude_sponsor_type=None, reported_outcomes=None, limit=50, offset=0):
     """
     exclude_sponsor_type: "academic" to strictly filter OUT university/hospital/institute/
     government sponsors (for queries like "not interested in academia"). Classification is
     heuristic, by sponsor name (no authoritative sponsor-type field exists in the schema).
+
+    reported_outcomes: list of endpoint abbreviations (e.g. ["OS", "ORR", "PFS"]) --
+    OR logic, restricts to trials with at least one arm carrying a NON-NULL posted
+    value for ANY of these metrics in results_outcomes_basic_info. Without this,
+    "trials that have OS/ORR/PFS reported" has no way to be expressed and silently
+    gets dropped, returning the same unfiltered set as a bare condition search.
     """
     raw_filters = {
         "condition": condition,
@@ -271,6 +277,18 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
         )
         params["drug"] = [f"%{d}%" for d in expanded]
         filters_extracted = True
+    if reported_outcomes:
+        where_clauses.append(
+            "EXISTS (SELECT 1 FROM oncosuite_gold.cohort_info c3 "
+            "JOIN oncosuite_gold.arms_info a3 ON a3.cohort_id = c3.cohort_id "
+            "JOIN oncosuite_gold.results_outcomes_basic_info r3 ON r3.arm_id = a3.arm_id "
+            "JOIN oncosuite_gold.study_endpoints_info e3 ON e3.endpoint_id = r3.endpoint_id "
+            "WHERE c3.oncosuite_id = t.oncosuite_id "
+            "AND UPPER(e3.endpoint_abbreviation) = ANY(%(reported_outcomes)s) "
+            "AND r3.value IS NOT NULL)"
+        )
+        params["reported_outcomes"] = [m.upper() for m in reported_outcomes]
+        filters_extracted = True
 
     where_sql = " AND ".join(where_clauses)
 
@@ -301,6 +319,34 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
         )
         nct_map = {r["oncosuite_id"]: r["source_unique_id"] for r in nct_rows}
 
+    # When reported_outcomes filtered the search, show WHICH of those metrics
+    # each trial actually has -- the filter alone doesn't say why a given row
+    # qualified, and a trial can have some but not all of the requested metrics.
+    reported_map = {}
+    if reported_outcomes and ids:
+        metric_order = [m.upper() for m in reported_outcomes]
+        metric_rows = query(
+            """
+            SELECT c4.oncosuite_id, UPPER(e4.endpoint_abbreviation) AS metric
+              FROM oncosuite_gold.cohort_info c4
+              JOIN oncosuite_gold.arms_info a4 ON a4.cohort_id = c4.cohort_id
+              JOIN oncosuite_gold.results_outcomes_basic_info r4 ON r4.arm_id = a4.arm_id
+              JOIN oncosuite_gold.study_endpoints_info e4 ON e4.endpoint_id = r4.endpoint_id
+             WHERE c4.oncosuite_id = ANY(%(ids)s)
+               AND UPPER(e4.endpoint_abbreviation) = ANY(%(metrics)s)
+               AND r4.value IS NOT NULL
+             GROUP BY c4.oncosuite_id, UPPER(e4.endpoint_abbreviation)
+            """,
+            {"ids": ids, "metrics": metric_order},
+        )
+        found_by_id = {}
+        for r in metric_rows:
+            found_by_id.setdefault(r["oncosuite_id"], set()).add(r["metric"])
+        reported_map = {
+            oid: ", ".join(m for m in metric_order if m in metrics)
+            for oid, metrics in found_by_id.items()
+        }
+
     results = [
         {
             "oncosuite_id": r["oncosuite_id"],
@@ -311,6 +357,8 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
             "sponsor": r["sponsor_name"],
             "enrollment": r["enrollment_count"],
             "start_date": str(r["start_date"]) if r["start_date"] else None,
+            **({"reported_outcomes": reported_map.get(r["oncosuite_id"], "")}
+               if reported_outcomes else {}),
         }
         for r in rows
     ]
@@ -321,4 +369,16 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
         "returned": len(results),
         "unmatched_terms": unmatched_terms,
         "filters_extracted": filters_extracted,
+        # The exact kwargs this call was made with (minus limit/offset/paging
+        # state) -- so a caller can persist this in session memory and re-run
+        # the SAME search later (e.g. "show me a map for the same trials")
+        # without having to re-derive filters from the original phrasing.
+        "filters_applied": {
+            "condition": condition, "biomarkers": biomarkers, "cancer_stage": cancer_stage,
+            "line_of_therapy": line_of_therapy, "prior_therapy": prior_therapy,
+            "drug_name_or_target": drug_name_or_target, "phase": phase,
+            "study_status": study_status, "sponsor": sponsor,
+            "exclude_sponsor_type": exclude_sponsor_type,
+            "reported_outcomes": reported_outcomes,
+        },
     }

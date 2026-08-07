@@ -13,6 +13,7 @@ a density value.
 
 import csv
 import io
+import math
 import os
 import re
 
@@ -373,7 +374,12 @@ def build_case_burden_country(country_name, limit=3000):
             "countryName": resolved_country,
             "iso3": _CASE_BURDEN_NAME_TO_ISO3.get(str(resolved_country).strip().lower()),
             "population": int(pop) if pop is not None else None,
-            "caseCount": round(cr, 2), "caseRatio": round(cr, 2),
+            # Ceiling, not round-to-nearest: a fractional case count (143.04)
+            # always reads as "144 cases" here, not "143" -- a case count is a
+            # discrete headcount, and rounding DOWN a fraction of a real case
+            # is the wrong direction for it (round-to-nearest would silently
+            # drop 143.04 to 143, understating the number).
+            "caseCount": math.ceil(cr), "caseRatio": math.ceil(cr),
             "area": area_f,
             "density": round(density, 4),
             "intensity": round(min(10.0, (density / peak_density) * 10), 2) if density else 0,
@@ -382,9 +388,88 @@ def build_case_burden_country(country_name, limit=3000):
 
     return {
         "data": points,
-        "cohortTotal": round(total_cases),
+        "cohortTotal": math.ceil(total_cases),
         "variant": "population",
         "legendTitle": f"New cancer cases — {resolved_country}",
+        "totalLabel": "cases per year",
+    }
+
+
+def build_case_burden_city(city_name, countries=None, limit=50):
+    """Case-burden points for cities matching `city_name` (ILIKE substring),
+    optionally restricted to `countries` (lowercase full names, as used
+    elsewhere in this module) -- used to resolve a bare follow-up naming just
+    a city ("show me for Hamburg") against whichever countries the session's
+    last case-burden question named.
+
+    Several countries can share a city name (map_view_population genuinely
+    has one Hamburg, Germany at ~1.9M population alongside six small US towns
+    also named Hamburg, population in the hundreds/low thousands) -- rather
+    than guess which one the user means, ALL matches are returned, sorted by
+    case_ratio DESC so the significant match surfaces first instead of an
+    arbitrary/unordered list, with each point's country clearly labelled.
+    """
+    where = ["city ILIKE %s", "city IS NOT NULL", "city <> ''",
+            "latitude IS NOT NULL", "longitude IS NOT NULL"]
+    params = [f"%{city_name}%"]
+    if countries:
+        where.append("LOWER(country) = ANY(%s)")
+        params.append([c.lower() for c in countries])
+    sql = f"""
+        SELECT latitude, longitude, city, country, case_ratio, city_population,
+               city_area_km2, zipcode
+          FROM oncosuite_gold.map_view_population
+         WHERE {' AND '.join(where)}
+         ORDER BY case_ratio DESC NULLS LAST
+         LIMIT %s
+    """
+    params.append(limit)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, tuple(params))
+        rows = cur.fetchall()
+    if not rows:
+        return None
+
+    densities = [float(cr) / float(area) for *_, cr, _, area, _ in rows
+                if cr is not None and area]
+    peak_density = max(densities, default=0) or 1
+
+    points = []
+    total_cases = 0.0
+    for lat, lon, city, country, case_ratio, pop, area, zipcode in rows:
+        cr = float(case_ratio) if case_ratio is not None else 0.0
+        total_cases += cr
+        area_f = float(area) if area is not None else None
+        density = (cr / area_f) if (area_f and cr) else 0
+        points.append({
+            "lat": float(lat), "lng": float(lon),
+            # Country in the label -- with several same-named cities on one
+            # map, "Hamburg" alone would be ambiguous about which point is
+            # which when hovering.
+            "name": f"{city}, {country}",
+            "countryName": country,
+            "iso3": _CASE_BURDEN_NAME_TO_ISO3.get(str(country).strip().lower()),
+            "population": int(pop) if pop is not None else None,
+            "caseCount": math.ceil(cr), "caseRatio": math.ceil(cr),
+            "area": area_f,
+            "density": round(density, 4),
+            "intensity": round(min(10.0, (density / peak_density) * 10), 2) if density else 0,
+            "zipcode": zipcode,
+        })
+
+    # Distinct countries only, in first-seen (== case_ratio DESC) order -- the
+    # points themselves can repeat a country many times (six small US towns
+    # all named Hamburg), but the legend should name each country once.
+    seen_countries = []
+    for p in points:
+        if p["countryName"] not in seen_countries:
+            seen_countries.append(p["countryName"])
+    matches = ", ".join(seen_countries)
+    return {
+        "data": points,
+        "cohortTotal": math.ceil(total_cases),
+        "variant": "population",
+        "legendTitle": f"New cancer cases — {city_name.title()} ({matches})",
         "totalLabel": "cases per year",
     }
 
@@ -444,7 +529,10 @@ def build_case_burden_global(limit=200, only=None):
             "name": country, "countryName": country,
             "iso3": _CASE_BURDEN_NAME_TO_ISO3.get(key),
             "population": int(population) if population is not None else None,
-            "caseCount": round(cases, 2), "caseRatio": round(cases, 2),
+            # Ceiling, not round-to-nearest -- see build_case_burden_country's
+            # comment: a case count is a discrete headcount, so a fractional
+            # value always rounds UP to the next whole case, never down.
+            "caseCount": math.ceil(cases), "caseRatio": math.ceil(cases),
             "area": area,
             "density": round(density, 6),
             "intensity": round(min(10.0, (cases / peak_cases) * 10), 2) if cases else 0,
@@ -457,11 +545,35 @@ def build_case_burden_global(limit=200, only=None):
              if only else "New cancer cases per year")
     return {
         "data": points,
-        "cohortTotal": round(total_cases),
+        "cohortTotal": math.ceil(total_cases),
         "variant": "population",
         "legendTitle": legend,
         "totalLabel": "cases per year",
     }
+
+
+# Common abbreviations for names in _CASE_BURDEN_COUNTRY_CENTROIDS that
+# people actually type ("US", "UK") -- without these, only the full name
+# matches and e.g. "cases in the US, UK, and Germany" silently drops two of
+# "us" is matched case-sensitively (no re.IGNORECASE) since lowercase "us"
+# collides with the pronoun ("let us know") -- but people don't reliably type
+# the country code in caps ("germany us and uk"), so a SEPARATE list-context
+# check below also accepts lowercase "us" when it sits directly next to
+# "and"/"&"/"," the way a list item does ("us and uk", "uk, us"), which a
+# pronoun essentially never does ("let us know", "join us today" -- "us" is
+# followed by a verb/object, not another list item). "uk" has no such
+# collision (not an English word), so it's plain case-insensitive.
+_CASE_BURDEN_COUNTRY_ALIASES_CI = {
+    "usa": "united states", "u.s.a.": "united states", "u.s.": "united states",
+    "u.k.": "united kingdom", "uk": "united kingdom",
+}
+_CASE_BURDEN_COUNTRY_ALIASES_CS = {
+    "US": "united states",
+}
+_US_LIST_CONTEXT_RE = re.compile(
+    r"(?<!\w)(?:and|&)\s+us(?!\w)|(?<!\w)us\s+(?:and|&)(?!\w)|,\s*us(?!\w)|(?<!\w)us\s*,",
+    re.IGNORECASE,
+)
 
 
 # Countries actually present in map_view_population (its own name set, not
@@ -474,7 +586,21 @@ def _case_burden_countries_in_question(question):
     would grab part of it first."""
     q = str(question or "")
     names = sorted(_CASE_BURDEN_COUNTRY_CENTROIDS.keys(), key=len, reverse=True)
-    return [name for name in names if re.search(rf"\b{re.escape(name)}\b", q, re.IGNORECASE)]
+    found = [name for name in names if re.search(rf"\b{re.escape(name)}\b", q, re.IGNORECASE)]
+
+    # (?<!\w)/(?!\w) rather than \b: \b fails right after a trailing "."
+    # (both neighbors are non-word there, so no boundary), which would
+    # silently break aliases like "U.S."/"U.K.".
+    for alias, canonical in _CASE_BURDEN_COUNTRY_ALIASES_CI.items():
+        if canonical not in found and re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", q, re.IGNORECASE):
+            found.append(canonical)
+    for alias, canonical in _CASE_BURDEN_COUNTRY_ALIASES_CS.items():
+        if canonical not in found and re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", q):
+            found.append(canonical)
+    if "united states" not in found and _US_LIST_CONTEXT_RE.search(q):
+        found.append("united states")
+
+    return found
 
 
 def build_case_burden_map(question=""):
@@ -498,3 +624,89 @@ def build_case_burden_map(question=""):
         if result:
             return result
     return build_case_burden_global()
+
+
+# ---------------------------------------------------------------------------
+# Case-burden BY CANCER STAGE (oncosuite_gold.case_filters) -- a separate,
+# richer table (loaded from merged_clean_global.csv) that carries a stage/
+# biomarker/line-of-therapy breakdown the map_view_population points above
+# don't have. Only covers organ='Lung', so this only ever answers questions
+# that name a specific lung-cancer driver biomarker.
+# ---------------------------------------------------------------------------
+
+# Base driver-mutation biomarkers case_filters carries for organ='Lung', mapped
+# to the exact `biomarkers` value to query -- case_filters also has
+# variant-level rows (e.g. "EGFR Exon 19 deletion") but a plain-language
+# question names the gene, so this queries the gene's own umbrella row, not
+# one variant arbitrarily picked out of several.
+_LUNG_BIOMARKER_ALIASES = {
+    "EGFR": "EGFR", "ALK": "ALK", "KRAS": "KRAS", "BRAF": "BRAF", "MET": "MET",
+    "RET": "RET", "ROS1": "ROS1", "HER2": "HER2 (ERBB2)", "ERBB2": "HER2 (ERBB2)",
+    "FGFR1": "FGFR1", "FGFR": "FGFR", "NTRK": "NTRK", "PIK3CA": "PIK3CA",
+    "DDR2": "DDR2", "DLL3": "DLL3", "NRG1": "NRG1",
+}
+
+# case_filters' organ='Lung' rows cover NSCLC and SCLC together, so its
+# cancer_stage values include the SCLC-only VALG staging terms (Limited/
+# Extensive Stage) alongside NSCLC's TNM-derived stages. None of the driver
+# mutations above are an SCLC staging category -- "EGFR-mutant Extensive
+# Stage" isn't a real clinical group -- so these are dropped rather than
+# shown next to a biomarker they don't apply to.
+_SCLC_ONLY_STAGES = {"Extensive Stage", "Limited Stage"}
+
+_STAGE_ORDER = {
+    "Early Stage": 0, "Locally Advanced / Advanced": 1,
+    "Advanced / Metastatic": 2, "Not Specified": 3,
+}
+
+
+def _lung_biomarker_in_question(question):
+    """The case_filters `biomarkers` value for the driver mutation named in the
+    question (longest alias first, so "FGFR1" matches before "FGFR"), or None."""
+    q = str(question or "")
+    for alias in sorted(_LUNG_BIOMARKER_ALIASES, key=len, reverse=True):
+        if re.search(rf"\b{re.escape(alias)}\b", q, re.IGNORECASE):
+            return _LUNG_BIOMARKER_ALIASES[alias]
+    return None
+
+
+def build_case_stage_breakdown(question=""):
+    """Country x cancer-stage annual new-case counts for one named lung-cancer
+    driver biomarker, from oncosuite_gold.case_filters. Returns PanelTable
+    props ({title, columns, data}) or None when the question doesn't name a
+    biomarker this table covers, or no country, or nothing matches."""
+    biomarker = _lung_biomarker_in_question(question)
+    if not biomarker:
+        return None
+    countries = _case_burden_countries_in_question(question)
+    if not countries:
+        return None
+
+    sql = """
+        SELECT country, cancer_stage, annual_new_cases
+          FROM oncosuite_gold.case_filters
+         WHERE organ = 'Lung' AND biomarkers = %s AND histology = 'All'
+               AND line_of_therapy = 'All' AND cancer_stage != 'All'
+               AND lower(country) = ANY(%s)
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, (biomarker, countries))
+        rows = cur.fetchall()
+
+    rows = [r for r in rows if r[1] not in _SCLC_ONLY_STAGES]
+    if not rows:
+        return None
+    rows.sort(key=lambda r: (r[0], _STAGE_ORDER.get(r[1], 99)))
+
+    return {
+        "title": f"{biomarker}-mutant NSCLC — annual new cases by stage",
+        "columns": [
+            {"key": "country", "label": "Country"},
+            {"key": "stage", "label": "Cancer Stage", "filter": True},
+            {"key": "cases", "label": "Annual new cases"},
+        ],
+        "data": [
+            {"country": country.title(), "stage": stage, "cases": cases}
+            for country, stage, cases in rows
+        ],
+    }

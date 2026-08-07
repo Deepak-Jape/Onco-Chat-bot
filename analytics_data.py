@@ -988,3 +988,120 @@ def build_population_by_country(oncosuite_ids=None, limit=60):
     ]
     out.sort(key=lambda r: r["population"] or 0, reverse=True)
     return out
+
+
+# Known clean metric tokens -- matches the vocabulary build_efficacy_safety_wide
+# already plots. analytics.efficacyvssafety_table also carries combined/messy
+# labels (e.g. "TEAES, TESAES") from its extraction pipeline; those never match
+# an UPPER() equality check here, so they are excluded rather than mislabeled
+# as one metric.
+_EXTRACTED_X = ("ORR", "DCR", "DOR", "DCB", "PCR", "TTR", "SD", "SOD", "PFS", "OS")
+_EXTRACTED_Y = ("AE", "SAE", "AES", "DLT", "TEAE")
+
+
+def build_efficacy_safety_extracted(oncosuite_ids=None, limit=1000):
+    """Efficacy-vs-safety scatter from analytics.efficacyvssafety_table --
+    an LLM-extraction table that has NOT been deduplicated: the same arm can
+    carry several conflicting values for the same metric (seen directly: one
+    arm's DLT reported as 0.0, 10.45, 22.0 and 47.8). There's no way to pick
+    the "right" one -- confidence_score and source_text are NULL on every one
+    of these rows (checked directly), so AVG() is used rather than MAX(): MAX
+    would systematically bias every point toward the worst-looking safety
+    rate and best-looking efficacy rate, which isn't neutral, it's cherry-
+    picking the extreme in a specific direction. AVG is still not a verified
+    value, just an unbiased one.
+
+    Callers MUST treat a non-None result as extracted/unverified and caveat it
+    visibly -- this is a last-resort fallback for when the clean sources
+    (oncosuite_gold outcomes, analytics.efficacy_vs_safety) have no coverage at
+    all for the trial set in question, not a general-purpose data source.
+    """
+    clause, params = _scope(
+        "t", oncosuite_ids,
+        ["t.endpoint_value IS NOT NULL",
+         "UPPER(t.endpoint_abbr) = ANY(%s)"],
+        params=[list(_EXTRACTED_X + _EXTRACTED_Y)],
+    )
+    sql = f"""
+        SELECT t.oncosuite_id, t.arm_name,
+               MIN(t.backbone::text)             AS backbone,
+               MIN(t.combination_modality::text)  AS modality,
+               MIN(t.phase::text)                 AS phase,
+               UPPER(t.endpoint_abbr)              AS metric,
+               AVG(t.endpoint_value)               AS value
+          FROM analytics.efficacyvssafety_table t
+          {clause}
+         GROUP BY t.oncosuite_id, t.arm_name, UPPER(t.endpoint_abbr)
+         LIMIT %s
+    """
+    params.append(limit)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, tuple(params))
+        rows = cur.fetchall()
+    if not rows:
+        return None
+
+    arms = {}
+    for oid, arm_name, backbone, modality, phase, metric, value in rows:
+        key = (oid, arm_name)
+        entry = arms.setdefault(key, {
+            "oncosuite_id": oid, "arm_name": arm_name,
+            "strategy": backbone or modality or "Unknown",
+            "phase": _first(phase) or "Unknown",
+            "metrics": {},
+        })
+        if value is not None:
+            entry["metrics"][metric] = float(value)
+
+    points = [
+        {
+            "name": info["arm_name"] or info["oncosuite_id"],
+            "metrics": info["metrics"],
+            "orr": info["metrics"].get("ORR"),
+            "sae": info["metrics"].get("SAE") or info["metrics"].get("AE"),
+            "n": 1,
+            "strategy": info["strategy"],
+            "biomarker": info["phase"],
+            "mode": "Unknown",
+            "phase": info["phase"],
+            "year": None,
+            "lineOfTherapy": [],
+            "stage": [],
+            "country": [],
+            "oncosuite_id": info["oncosuite_id"],
+        }
+        for info in arms.values()
+    ]
+
+    def _have(m):
+        return sum(1 for p in points if p["metrics"].get(m) is not None)
+
+    def _pair_count(x, y):
+        return sum(1 for p in points
+                   if p["metrics"].get(x) is not None and p["metrics"].get(y) is not None)
+
+    x_options = [m for m in _EXTRACTED_X if _have(m) >= 3]
+    y_options = [m for m in _EXTRACTED_Y if _have(m) >= 3]
+    if not x_options or not y_options:
+        return None
+
+    default_x, default_y = max(
+        ((x, y) for x in x_options for y in y_options),
+        key=lambda pair: _pair_count(*pair),
+    )
+    if _pair_count(default_x, default_y) < 3:
+        return None
+
+    return {
+        "liveData": points,
+        "xOptions": x_options,
+        "yOptions": y_options,
+        "defaultX": default_x,
+        "defaultY": default_y,
+        "pairCounts": {f"{x}|{y}": _pair_count(x, y)
+                       for x in x_options for y in y_options},
+        "colorOptions": [
+            {"label": "Color by Backbone/Modality", "field": "strategy"},
+            {"label": "Color by Phase", "field": "phase"},
+        ],
+    }
