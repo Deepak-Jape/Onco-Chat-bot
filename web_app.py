@@ -710,7 +710,26 @@ def render_search_results(tr):
                          f'{donut_chart(chart_data, title="Matches by phase", value_suffix=" trials")}'
                          f'</div>')
 
-    return head + chart_html
+    # The actual matched trials -- previously only the count and phase donut
+    # above were rendered, so a search answer never showed which trials it
+    # actually found. NCT id is left as plain text so linkify_trial_ids (run
+    # over the whole html block) wraps it into the same clickable
+    # trial-detail-drawer button every other trial id in an answer gets.
+    rows = ['<div class="table-wrap"><table class="data-table"><thead><tr>'
+            '<th>Trial</th><th>Title</th><th>Sponsor</th><th>Phase</th>'
+            '<th>Status</th></tr></thead><tbody>']
+    for r in results:
+        ident = r.get("nct_id") or r.get("oncosuite_id") or ""
+        rows.append(
+            f'<tr><td>{esc(ident)}</td>'
+            f'<td>{esc(r.get("title"))}</td>'
+            f'<td>{esc(r.get("sponsor"))}</td>'
+            f'<td>{esc(r.get("phase"))}</td>'
+            f'<td>{esc(r.get("status"))}</td></tr>'
+        )
+    rows.append("</tbody></table></div>")
+
+    return head + chart_html + "".join(rows)
 
 
 def render_compare_arms(tr):
