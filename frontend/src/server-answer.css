@@ -36,6 +36,36 @@
 .server-answer .tbl-pager button:disabled { color: rgba(0,0,0,0.25); cursor: default; }
 .server-answer .tbl-pager .pg-gap { color: rgba(0,0,0,0.45); padding: 0 4px; }
 
+/* Row hidden because it fails the active column filter(s) -- separate from
+   .pg-hidden (wrong page) so the two reasons a row is hidden never fight:
+   showPage() checks both before deciding a row's final visibility. */
+.server-answer tr.filter-hidden { display: none; }
+
+.server-answer th.th-filterable { position: relative; }
+.server-answer .th-filter-btn {
+  display: inline-flex; align-items: center; gap: 4px; border: 0; padding: 0;
+  background: transparent; font: inherit; font-weight: 600; color: inherit;
+  cursor: pointer;
+}
+.server-answer .th-filter-tri { font-size: 9px; color: rgba(0,0,0,0.45); }
+.server-answer .th-filter-pop {
+  position: absolute; top: 100%; left: 0; z-index: 30; margin-top: 4px;
+  min-width: 150px; max-height: 240px; overflow-y: auto;
+  background: #fff; border: 1px solid rgba(0,0,0,0.1); border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(16,24,40,.14); padding: 6px 0;
+}
+.server-answer .th-filter-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+  font-size: 13px; font-weight: 400; color: #1f2937; cursor: pointer; white-space: nowrap;
+}
+.server-answer .th-filter-row:hover { background: #f7f9fc; }
+.server-answer .th-filter-all {
+  border-bottom: 1px solid rgba(0,0,0,0.08); margin-bottom: 2px; padding-bottom: 8px;
+}
+.server-answer tr.no-match-row td {
+  text-align: center; color: rgba(0,0,0,0.45); font-style: italic; padding: 16px;
+}
+
 .server-answer .meta { font-size:12px; color:#9aa4b2; margin-bottom:10px; }
  .server-answer .answer { background:#f0f6ff; border:1px solid #cfe0fb; border-left:4px solid #2563eb;
      border-radius:10px; padding:14px 18px; margin-bottom:14px; }

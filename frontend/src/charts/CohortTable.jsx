@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { BUTTON, C, FONT, statusColor as STATUS_COLOR } from "./tokens";
+import { BUTTON, C, CARD_TITLE, FONT, statusColor as STATUS_COLOR } from "./tokens";
 
 /* Cohort table built to the Figma spec.
 
@@ -20,12 +20,14 @@ import { BUTTON, C, FONT, statusColor as STATUS_COLOR } from "./tokens";
 const COLUMNS = [
   { key: "oncosuite_id", label: "OncoSuite ID", width: 118, kind: "id" },
   { key: "phase", label: "Phase", width: 92, filter: true },
+  { key: "year", label: "Year", width: 80, filter: true },
   { key: "indication", label: "Indication", width: 150 },
   { key: "regimen", label: "Regimen", width: 170 },
   { key: "n", label: "N", width: 118, kind: "stacked" },
   { key: "status", label: "Status", width: 120, kind: "status", filter: true },
   { key: "os", label: "OS", width: 118, kind: "metric" },
   { key: "orr", label: "ORR", width: 118, kind: "metric" },
+  { key: "pfs", label: "PFS", width: 118, kind: "metric" },
 ];
 
 const PAGE_SIZE = 10;
@@ -129,7 +131,7 @@ function Cell({ col, row, onOpen }) {
   return <div style={base}>{raw ?? "—"}</div>;
 }
 
-export default function CohortTable({ data = [], onOpenSummary }) {
+export default function CohortTable({ data = [], onOpenSummary, title }) {
   const [openFilter, setOpenFilter] = useState(null);
   const [filters, setFilters] = useState({});
   const [page, setPage] = useState(1);
@@ -146,6 +148,7 @@ export default function CohortTable({ data = [], onOpenSummary }) {
         ...f,
         [key]: cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value],
       };
+      
     });
   };
 
@@ -192,7 +195,8 @@ export default function CohortTable({ data = [], onOpenSummary }) {
         }
       }}
     >
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        {title ? <h3 style={{ ...CARD_TITLE, padding: 0, margin: 0 }}>{title}</h3> : <span />}
         <button
           type="button"
           onClick={downloadCsv}

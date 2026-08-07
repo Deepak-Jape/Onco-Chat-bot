@@ -142,6 +142,41 @@ export const REGISTRY = {
     enabled: true,
   },
 
+  // Median PFS/OS/ORR by drug mechanism/backbone for NSCLC or SCLC, from
+  // verified oncosuite_gold outcomes -- the analytics-schema efficacy tables
+  // have zero OS/PFS rows for any condition, so this is built straight from
+  // trial_info/drug_info/results_outcomes_basic_info instead.
+  EfficacyByMoATable: {
+    component: lazy(() => import("./PanelTable.jsx")),
+    label: "Effectiveness by mechanism of action",
+    useWhen: "comparing PFS/OS/ORR across drug mechanisms of action for NSCLC/SCLC",
+    requires: ["columns", "data"],
+    enabled: true,
+  },
+
+  EfficacyByBackboneTable: {
+    component: lazy(() => import("./PanelTable.jsx")),
+    label: "Effectiveness by treatment backbone",
+    useWhen: "comparing PFS/OS/ORR across treatment backbones for NSCLC/SCLC",
+    requires: ["columns", "data"],
+    enabled: true,
+  },
+
+  DifferentiationMatrixTable: {
+    // Same PanelTable as the other plain {columns, data} panels. One row per
+    // cohort (biomarker/stage/line-of-therapy/regimen vary by cohort within a
+    // trial, not just by trial), scoped to whichever trials the question
+    // already resolved -- see chart_data.build_differentiation_matrix.
+    component: lazy(() => import("./PanelTable.jsx")),
+    label: "Competing programs comparison",
+    useWhen:
+      "the question asks how competing trials/programs differ or compare " +
+      "on trial design, patient selection, biomarker strategy, line of " +
+      "therapy or combination regimen",
+    requires: ["columns", "data"],
+    enabled: true,
+  },
+
   PopulationMap: {
     // ctsearch's full choropleth map (density bands, legend, hover cards).
     // Data behind this chart is trial-SITE density from facility_info, NOT
@@ -154,6 +189,20 @@ export const REGISTRY = {
       "the question asks where trial sites are concentrated geographically, " +
       "or wants a density/heatmap view of site distribution across countries",
     requires: ["data"],
+    enabled: true,
+  },
+
+  CaseStageBreakdownTable: {
+    // Same PanelTable as the other plain {columns, data} panels. Country x
+    // cancer-stage annual new-case counts for a named lung-cancer driver
+    // biomarker, from oncosuite_gold.case_filters -- the only source with a
+    // stage dimension (CaseBurdenMap's map_view_population has none).
+    component: lazy(() => import("./PanelTable.jsx")),
+    label: "Cancer cases by stage",
+    useWhen:
+      "the question asks for annual new cancer cases broken down by cancer " +
+      "stage for a named biomarker (EGFR, ALK, KRAS, ...)",
+    requires: ["columns", "data"],
     enabled: true,
   },
 
@@ -173,15 +222,19 @@ export const REGISTRY = {
   },
 
   SiteMap: {
-    // ctsearch's own heat map, imported live like every other chart. It now
-    // takes an optional `points` prop -- with real facility_info coordinates
-    // passed in, its Math.random() placeholder path is bypassed entirely.
-    component: lazy(() => import("@ct/pages/trialsHeader/analytics/UsHeatMap")),
-    label: "Trial site heat map",
+    // Same MapView component as PopulationMap/CaseBurdenMap (see
+    // chart_data.build_site_map, which now delegates to map_data.
+    // build_map_points -- the same real trial-site-density data
+    // PopulationMap uses). Previously rendered through ctsearch's UsHeatMap,
+    // a DIFFERENT component that ignored the title/data passed in and always
+    // showed its own hardcoded "Population Density" legend regardless of
+    // what was actually plotted -- a real answer under a wrong label.
+    component: lazy(() => import("@ct/components/MapView")),
+    label: "Trial site density map",
     useWhen:
       "the question asks where specific trials or their sites/facilities are " +
       "located or running",
-    requires: ["points"],
+    requires: ["data"],
     enabled: true,
   },
 

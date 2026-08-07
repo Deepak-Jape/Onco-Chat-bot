@@ -16,9 +16,13 @@ import { C, FONT } from "./tokens";
 const POINT_COLUMNS = [
   { key: "name", label: "Location" },
   { key: "countryName", label: "Country" },
-  { key: "population", label: "Population" },
   { key: "caseCount", label: "Annual cases" },
-  { key: "density", label: "Density (cases/km²)" },
+  // PopulationMap's country-level points (build_map_points) carry these but
+  // no caseCount -- CaseBurdenMap's points carry caseCount but not these, so
+  // the "has any value" filter below naturally shows only the pair that
+  // applies to whichever chart is on screen.
+  { key: "trials", label: "Trials" },
+  { key: "sites", label: "Sites" },
 ];
 
 function segmentButtonStyle(active) {
@@ -43,8 +47,16 @@ export default function MapOrTable({ chart, props, onOpenSummary }) {
   // choropleth points, and an all-empty column would just read as noise.
   const columns = useMemo(() => {
     const points = props?.data || [];
-    return POINT_COLUMNS.filter((col) =>
-      points.some((p) => p[col.key] !== null && p[col.key] !== undefined && p[col.key] !== ""));
+    // At country-level granularity (the global choropleth, as opposed to a
+    // single-country city drill-down) `name` and `countryName` are the SAME
+    // value on every point by construction (see build_map_points) -- keeping
+    // both columns just repeats "China | China" down the whole table.
+    const isCountryLevel = points.length > 0
+      && points.every((p) => p.name != null && p.name === p.countryName);
+    return POINT_COLUMNS
+      .filter((col) => col.key !== "countryName" || !isCountryLevel)
+      .filter((col) =>
+        points.some((p) => p[col.key] !== null && p[col.key] !== undefined && p[col.key] !== ""));
   }, [props?.data]);
 
   return (
