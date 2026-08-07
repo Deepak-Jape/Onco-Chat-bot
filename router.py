@@ -525,6 +525,58 @@ def _record_answer(session_id, synthesis):
             conversations.add_assistant(session_id, text)
 
 
+#: Prefixed to every model-generated answer so a user can never mistake it for a
+#: figure that came out of the trial database.
+GENERAL_KNOWLEDGE_DISCLAIMER = (
+    "**Note:** I couldn't find this in the trial database or any connected data "
+    "source. The answer below is AI-generated from the model's general knowledge — "
+    "it is **not** sourced from your data and should be independently verified."
+)
+
+
+def _general_knowledge_response(user_message, history=None, on_step=None):
+    """LAST-RESORT fallback: answer from the model's own knowledge.
+
+    ONLY call this once every data path has genuinely been exhausted -- the keyword
+    tools, text-to-SQL, AND semantic/vector search must all have returned nothing.
+    The database is always tried first and in full; this never pre-empts it.
+    Returns a synthesis dict {"text", "mode"} for the caller to return under
+    response_mode="general_knowledge", or None if the LLM is unavailable -- in
+    which case the caller still refuses honestly rather than inventing an answer.
+    """
+    try:
+        import llm_client
+        import config
+        if not llm_client.available():
+            return None
+        if on_step:
+            try:
+                on_step("Not in the database — answering from general knowledge")
+            except Exception:
+                pass
+        system = (
+            "You are a clinical-trials assistant. The user's question could NOT be "
+            "answered from the connected clinical-trial database -- direct lookup, "
+            "SQL, and semantic search all found nothing relevant. Answer from your "
+            "general knowledge instead. Be accurate and cite the type of source "
+            "(e.g. SEER, GLOBOCAN, published literature) where you can, and say "
+            "plainly when a figure is an estimate or varies by source. Never imply "
+            "the numbers came from the user's database.\n\n"
+            + config.ANSWER_FORMAT_CONTRACT
+        )
+        messages = [{"role": "system", "content": system}]
+        if history:
+            messages += history[-config.MAX_HISTORY_TURNS:]
+        messages.append({"role": "user", "content": user_message})
+        answer = llm_client.chat(messages)
+        if not answer or not answer.strip():
+            return None
+        return {"text": f"{GENERAL_KNOWLEDGE_DISCLAIMER}\n\n---\n\n{answer.strip()}",
+                "mode": "llm"}
+    except Exception:
+        return None  # any failure -> caller falls back to an honest refusal
+
+
 def handle_turn(session_id: str, user_message: str, on_step=None,
                 skip_synthesis: bool = False) -> dict:
     """on_step: optional callback(str) invoked with a human-readable status at each
@@ -553,6 +605,35 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
     _history = conversations.history(session_id)
     conversations.add_user(session_id, user_message)
     _step("Understanding your question")
+
+    # GREETING / SMALL TALK (runs before classification): "hi", "thanks", "who are
+    # you". These have no data behind them, so without this branch they fall all the
+    # way through the cascade and surface the out-of-scope card, which reads as a
+    # failure. Match the WHOLE message so "hi" never fires on "which trials...".
+    _greet = user_message.strip().lower().strip("!.?,")
+    _GREETINGS = {
+        "hi", "hii", "hey", "hello", "yo", "hiya", "good morning",
+        "good afternoon", "good evening", "greetings", "hi there", "hello there",
+    }
+    _THANKS = {"thanks", "thank you", "thanks!", "ty", "thx", "cheers", "appreciate it"}
+    _WHOAREYOU = {"who are you", "what are you", "what can you do", "help",
+                  "what do you do", "how does this work"}
+    if _greet in _GREETINGS or _greet in _THANKS or _greet in _WHOAREYOU:
+        if _greet in _THANKS:
+            msg = "You're welcome — ask me anything else about the trial data."
+        else:
+            msg = (
+                "Hi — I'm your clinical-trials assistant. I can search and analyse the "
+                "lung cancer trial database. Try asking:\n\n"
+                "- *List all ADC trials from the last 10 years with their endpoints*\n"
+                "- *How many phase 3 EGFR trials are recruiting?*\n"
+                "- *Compare the arms of NCT04538664*\n"
+                "- *Show the competitive landscape by drug and phase*"
+            )
+        _syn = {"text": msg, "mode": "direct"}
+        _record_answer(session_id, _syn)
+        return {"intent": "greeting", "escalate": False,
+                "response_mode": "greeting", "synthesis": _syn}
 
     # EXPLICIT TRIAL ID OVERRIDE (runs before classification/RAG/landscape): a pasted
     # NCT number OR an internal oncosuite id (3-3-3 alphanumeric, e.g. "00v-vw5-Ejz")
@@ -744,6 +825,12 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
         vs = _vector_search_response(user_message)
         if vs is not None:
             return vs
+        # Every data path exhausted -> general knowledge, clearly disclaimed.
+        gk = _general_knowledge_response(user_message, _history, on_step)
+        if gk is not None:
+            _record_answer(session_id, gk)
+            return {"intent": intent, "escalate": False,
+                    "response_mode": "general_knowledge", "synthesis": gk}
         return {
             "intent": intent, "escalate": False,
             "response_mode": "out_of_scope_policy_needed",
@@ -760,11 +847,19 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
         vs = _vector_search_response(user_message)
         if vs is not None:
             return vs
+        # Every data path exhausted -> general knowledge, clearly disclaimed.
+        gk = _general_knowledge_response(user_message, _history, on_step)
+        if gk is not None:
+            _record_answer(session_id, gk)
+            return {"intent": intent, "escalate": False,
+                    "response_mode": "general_knowledge", "synthesis": gk}
         return {
             "intent": intent,
             "escalate": False,
             "response_mode": "out_of_scope_policy_needed",
-            "note": "Doc 05 flags this as a product decision, not resolved here.",
+            "note": ("I couldn't find an answer to that in the trial database, and "
+                     "the AI fallback is currently unavailable. Try rephrasing, or "
+                     "ask about trials, sponsors, phases, drugs, or endpoints."),
         }
 
     _step("Searching the trial database")

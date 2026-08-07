@@ -1367,6 +1367,16 @@ def render_answer(resp, question=""):
     if mode == "out_of_scope_policy_needed":
         return banner + ('<div class="card warn"><h3>Out of scope</h3>'
                          f'<p>{esc(resp.get("note"))}</p></div>')
+    if mode == "greeting":
+        return banner + render_synthesis(resp.get("synthesis"))
+    if mode == "general_knowledge":
+        # Nothing matched the database, so the model answered from its own
+        # knowledge. render_synthesis already renders the disclaimer that
+        # router.GENERAL_KNOWLEDGE_DISCLAIMER prepends to the text; the "warn"
+        # card frames the whole answer as unverified so it can't be mistaken
+        # for a figure that came out of the trial data.
+        return (banner + '<div class="card warn">'
+                + render_synthesis(resp.get("synthesis")) + '</div>')
     if mode == "cohort_list":
         return banner + render_cohort_list(resp.get("synthesis"))
     if mode == "agentic":
