@@ -1,5 +1,6 @@
 import { useState } from "react";
-import diamondIcon from "@ct/assets/Container_margin.svg";
+// Local copy -- see the note in StepTrace.jsx (asset absent from the submodule).
+import diamondIcon from "../assets/Container.svg";
 
 /* Collapsed-by-default recap of the step trace that was live while the answer
    was being built. Same numbered "Step N -- Title / sub-detail" layout and

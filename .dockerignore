@@ -9,3 +9,18 @@ tools/__pycache__/
 deploy/
 *.md
 test_embeddings.py
+
+# Frontend: the UI image runs its own `npm ci` and `vite build`, so shipping the
+# host's installed deps / previous build only bloats the context (and node_modules
+# built on Windows would be wrong for the linux builder anyway).
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/dev.log
+vendor/**/node_modules/
+vendor/**/dist/
+
+# Local server logs -- never belong in an image.
+server.log
+server.err.log

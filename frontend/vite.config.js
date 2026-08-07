@@ -30,6 +30,11 @@ const resolveVendorDeps = () => ({
 });
 
 export default defineConfig({
+  // Path prefix the app is served under. Root in dev; "/chat-bot/" in the
+  // container build (set via VITE_BASE in frontend/Dockerfile). This drives both
+  // the emitted asset URLs AND import.meta.env.BASE_URL, which src/api.js uses to
+  // prefix its API calls -- so the prefix is configured in exactly one place.
+  base: process.env.VITE_BASE || "/",
   plugins: [resolveVendorDeps(), react()],
   resolve: {
     // Array form so specifiers can be matched EXACTLY (object aliases are

@@ -1,11 +1,21 @@
 /* Talks to the Python app. Vite proxies /ask and /api to it in dev, so there is
    no CORS handling and no base-URL config on either side. */
 
+/* The app is served under a path prefix in production ("/chat-bot/") and at the
+   root in dev ("/"). Vite bakes that in as import.meta.env.BASE_URL from the
+   `base` option, so deriving the API prefix from it keeps one build config as the
+   single source of truth -- no separate env var to keep in sync.
+   Normalised to no trailing slash: "/chat-bot" or "". */
+const BASE = (import.meta.env.BASE_URL || "/").replace(/\/+$/, "");
+
+/** Prefix a root-relative API path with the deployment's base path. */
+const url = (path) => `${BASE}${path}`;
+
 /* Chart-first answer. Hits /ask/fast, which runs the query, asks the model only
    which chart fits, and returns typed blocks -- skipping the prose-writing LLM
    call that made broad questions time out. */
 export async function askFast(question, onStep) {
-  const res = await fetch("/ask/fast", {
+  const res = await fetch(url("/ask/fast"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ q: question }),
@@ -52,7 +62,7 @@ export async function askFast(question, onStep) {
 
 /** Parse the SSE body frame-by-frame, invoking onStep for each live step. */
 export async function askStream(question, onStep) {
-  const res = await fetch("/ask/stream", {
+  const res = await fetch(url("/ask/stream"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ q: question }),
@@ -114,7 +124,7 @@ export async function askStream(question, onStep) {
 }
 
 export async function fetchCharts(question, oncosuiteIds) {
-  const res = await fetch("/api/charts", {
+  const res = await fetch(url("/api/charts"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ q: question, oncosuite_ids: oncosuiteIds }),
@@ -126,7 +136,7 @@ export async function fetchCharts(question, oncosuiteIds) {
 
 /** Chart catalog, including which are gated and why. Useful for debugging. */
 export async function fetchCatalog() {
-  const res = await fetch("/api/charts");
+  const res = await fetch(url("/api/charts"));
   if (!res.ok) return {};
   return (await res.json()).charts || {};
 }

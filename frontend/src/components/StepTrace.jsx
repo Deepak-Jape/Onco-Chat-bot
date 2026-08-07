@@ -1,4 +1,9 @@
-import diamondIcon from "@ct/assets/Container_margin.svg";
+// The ctsearch submodule imports this icon from @ct/assets but never committed
+// the file, so it lives here instead (`vite build` fails on the missing path --
+// the dev server only resolves assets on demand, which is why it built locally).
+// Keep the .svg free of XML comments: Vite inlines small assets as a data: URI
+// verbatim, and a comment ahead of the <svg> tag stops it rendering.
+import diamondIcon from "../assets/Container.svg";
 
 /* Live "Analyzing your query..." trace.
 
