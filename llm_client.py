@@ -260,6 +260,10 @@ def _deepseek_chat(messages):
         raise LLMUnavailable(f"DeepSeek HTTP {e.code}: {body[:300]}") from e
     except urllib.error.URLError as e:
         raise LLMUnavailable(f"DeepSeek not reachable at {config.DEEPSEEK_BASE_URL}: {e}") from e
+    except TimeoutError as e:
+        # urlopen's timeout only guards connect; a stall mid-response (e.g. a slow
+        # chunked stream) raises a bare TimeoutError that bypasses URLError above.
+        raise LLMUnavailable(f"DeepSeek timed out after {config.LLM_TIMEOUT_SECONDS}s: {e}") from e
     try:
         choice = out["choices"][0]
         content = choice["message"]["content"]

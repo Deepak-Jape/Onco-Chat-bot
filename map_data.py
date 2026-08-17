@@ -336,6 +336,27 @@ _CASE_BURDEN_COUNTRY_AREA_KM2 = {
 }
 
 
+def _robust_density_peak(densities, percentile=95):
+    """Peak density for 0-10 intensity scaling, robust to a handful of extreme
+    outliers -- e.g. a `city_area_km2` data entry error of 0.1 km2 for a real
+    city produces a density hundreds of times any legitimate value. Scaling
+    every OTHER point's intensity against that one bad row's density pushed
+    them all toward 0 (rendering white on the map) even though their actual
+    case-per-area figures were perfectly ordinary.
+
+    Using the 95th-percentile density as the scale peak instead of the raw max
+    keeps the normal distribution of points spread across the color range; a
+    genuine outlier still renders at the top of the scale (its ratio exceeds
+    1.0, clamped to intensity 10 by the existing min(10.0, ...) at each
+    call site) rather than distorting everyone else's colour.
+    """
+    vals = sorted(v for v in densities if v and v > 0)
+    if len(vals) < 20:
+        return max(vals, default=0) or 1
+    peak = vals[min(len(vals) - 1, int(len(vals) * percentile / 100))]
+    return peak or (vals[-1] or 1)
+
+
 def build_case_burden_country(country_name, limit=3000):
     """City-level real case-burden points within ONE named country."""
     sql = """
@@ -359,7 +380,7 @@ def build_case_burden_country(country_name, limit=3000):
     # to near-white, even ones with a genuinely high case rate for their size.
     densities = [float(cr) / float(area) for *_, cr, _, area, _ in rows
                 if cr is not None and area]
-    peak_density = max(densities, default=0) or 1
+    peak_density = _robust_density_peak(densities)
     resolved_country = rows[0][3]
 
     points = []
@@ -432,7 +453,7 @@ def build_case_burden_city(city_name, countries=None, limit=50):
 
     densities = [float(cr) / float(area) for *_, cr, _, area, _ in rows
                 if cr is not None and area]
-    peak_density = max(densities, default=0) or 1
+    peak_density = _robust_density_peak(densities)
 
     points = []
     total_cases = 0.0

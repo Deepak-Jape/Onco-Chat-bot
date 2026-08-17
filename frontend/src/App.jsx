@@ -281,23 +281,56 @@ function Answer({ blocks, onOpenSummary, onServerAnswerClick }) {
                 {b.title || "Key Insights"}
               </h3>
               <ul style={{ margin: 0, padding: 0, listStyle: "none", color: "rgba(0,0,0,0.7)" }}>
-                {(b.items || []).map((t, j) => (
-                  <li
-                    key={j}
-                    style={{
-                      display: "flex", alignItems: "flex-start", gap: 10,
-                      fontSize: 14, lineHeight: "22px", marginBottom: 8,
-                    }}
-                  >
-                    <span
+                {(b.items || []).map((t, j) => {
+                  // key_learnings.py emits multi-paragraph, **bold**-labeled
+                  // cards (Finding/Evidence/Why it matters/.../Evidence
+                  // level) joined by newlines; answer_insights.py's simple
+                  // per-answer bullets stay single-line plain sentences. Tell
+                  // them apart by newline count so the plain-bullet look
+                  // (dot + flat text) is unchanged for the simple case.
+                  const lines = t.split("\n").filter((l) => l.trim() !== "");
+                  if (lines.length > 1) {
+                    return (
+                      <li
+                        key={j}
+                        style={{
+                          fontSize: 14, lineHeight: "22px", marginBottom: 14,
+                          paddingBottom: 14,
+                          borderBottom: j < (b.items.length - 1) ? "1px solid rgba(0,0,0,0.06)" : "none",
+                        }}
+                      >
+                        {lines.map((line, k) => (
+                          <div key={k} style={{ marginBottom: 4 }}>
+                            {line.split(/\*\*(.+?)\*\*/g).map((part, p) =>
+                              p % 2 ? <strong key={p}>{part}</strong> : part,
+                            )}
+                          </div>
+                        ))}
+                      </li>
+                    );
+                  }
+                  return (
+                    <li
+                      key={j}
                       style={{
-                        width: 6, height: 6, marginTop: 8, borderRadius: "50%",
-                        background: "rgba(0,0,0,0.2)", flexShrink: 0,
+                        display: "flex", alignItems: "flex-start", gap: 10,
+                        fontSize: 14, lineHeight: "22px", marginBottom: 8,
                       }}
-                    />
-                    <span>{t}</span>
-                  </li>
-                ))}
+                    >
+                      <span
+                        style={{
+                          width: 6, height: 6, marginTop: 8, borderRadius: "50%",
+                          background: "rgba(0,0,0,0.2)", flexShrink: 0,
+                        }}
+                      />
+                      <span>
+                        {t.split(/\*\*(.+?)\*\*/g).map((part, p) =>
+                          p % 2 ? <strong key={p}>{part}</strong> : part,
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           );

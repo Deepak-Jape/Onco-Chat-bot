@@ -4,3 +4,5 @@
 # Embeddings use a local Ollama HTTP call (stdlib urllib) -- no python client needed.
 psycopg2-binary==2.9.12
 langgraph==1.2.9
+openpyxl==3.1.5
+pandas==3.0.5

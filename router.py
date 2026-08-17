@@ -85,18 +85,39 @@ def classify_and_extract(user_message: str, working_set: dict) -> dict:
 
     # PORTFOLIO-LEVEL AGGREGATE questions ("how many ... broken down by phase",
     # "count of recruiting vs completed", "average enrollment per sponsor") must go
-    # straight to text-to-SQL -- the fixed single-trial/arm tools cannot express counts,
-    # groupings, or cross-trial breakdowns. Detect this FIRST, before the narrow
-    # keyword rules below can mis-grab it (e.g. "vs" -> arm_comparison, or an active
-    # trial in the session hijacking it into single_trial_lookup).
-    _AGG = ("how many", "count", "number of", "broken down", "break down", "breakdown",
+    # straight to text-to-SQL -- the fixed single-trial/arm tools cannot express
+    # groupings, cross-trial breakdowns, or statistics. Detect this FIRST, before the
+    # narrow keyword rules below can mis-grab it (e.g. "vs" -> arm_comparison, or an
+    # active trial in the session hijacking it into single_trial_lookup).
+    #
+    # A BARE count word ("how many"/"count"/"number of") is deliberately kept OUT of
+    # this list: "how many phase 3 EGFR trials are recruiting" needs no grouping or
+    # math -- search_trials's own total_matches already answers it, AND (unlike a raw
+    # `SELECT COUNT(*)`) also returns the actual matching trials for the table +
+    # insights below it. Sending it to text-to-SQL instead threw away exactly that --
+    # a bare number with no way to see which trials it counted. See _COUNT_ONLY below.
+    _AGG = ("broken down", "break down", "breakdown",
             "grouped by", "group by", "by phase", "by sponsor", "by status", "by country",
             "per phase", "per sponsor", "distribution", "average", "avg", "mean", "median",
-            "total number", "most ", "least ", "fewest", "highest", "lowest", "top ", "rank",
-            "across all", "how much", "percentage", "proportion")
+            "most ", "least ", "fewest", "highest", "lowest", "top ", "rank",
+            "percentage", "proportion")
     _PORTFOLIO = ("trials", "studies", "sponsors", "phases", "our oncology", "portfolio",
                   "recruiting vs", "vs completed", "vs. completed")
     if not re.search(r"nct\d{8}", msg) and any(a in msg for a in _AGG) and any(p in msg for p in _PORTFOLIO):
+        return {"intent": "aggregate_query", "filters": {}}
+
+    # A bare count ("how many"/"count"/"number of"/"total number"/"how much"/
+    # "across all") with nothing concrete to scope it by (no condition, biomarker,
+    # phase, or status named) is still a portfolio-wide question the fixed tool
+    # can't meaningfully answer -- fall through to text-to-SQL for that case only.
+    _COUNT_ONLY = ("how many", "count", "number of", "total number", "how much", "across all")
+    _CONCRETE_SCOPE_TERMS = ("nsclc", "lung", "kras", "egfr", "alk", "ros1",
+                             "phase 1", "phase 2", "phase 3", "phase 4",
+                             "recruiting", "completed", "terminated", "withdrawn",
+                             "suspended", "not yet recruiting")
+    if (not re.search(r"nct\d{8}", msg) and any(a in msg for a in _COUNT_ONLY)
+            and any(p in msg for p in _PORTFOLIO)
+            and not any(s in msg for s in _CONCRETE_SCOPE_TERMS)):
         return {"intent": "aggregate_query", "filters": {}}
 
     # Explicit "compare ... arms" is the one case where a named trial should still go
@@ -319,8 +340,17 @@ def _vector_search_response(user_message):
 def _cohort_list_response(user_message, classification, on_step=None):
     """Cohort-level answer per the client's spec: 'N cohorts within M trials' + a
     table (OncoSuite ID | Indication | Regimen | Phase | Status), clickable rows,
-    Key Insights, and Next Steps. Streams the client's 6 named steps. Returns a
-    response dict with response_mode='cohort_list', or None to fall through."""
+    Key Insights, and Next Steps. Returns a response dict with
+    response_mode='cohort_list', or None to fall through.
+
+    Streams exactly 2 steps -- one per actual operation below. This used to
+    announce 6 named steps (a fixed UI spec), but 3 of them ("Creating table
+    structure", "Verifying source-data traceability", "Generating table") had
+    no code behind them at all -- they fired back-to-back with nothing running
+    in between, and "Generating key insights" fired AFTER synthesize_cohorts()
+    had already finished, describing something already done rather than in
+    progress. Real progress only has two moments: the DB call, and the
+    (deterministic, non-LLM) insight computation from its results."""
     def step(m):
         if on_step:
             on_step(m)
@@ -343,16 +373,13 @@ def _cohort_list_response(user_message, classification, on_step=None):
     if not kwargs:
         return None  # nothing to scope a cohort search on -> let normal cascade run
 
-    step("Creating table structure")
     step("Pulling relevant data from the trials")
     tr = search_cohorts(**kwargs)
-    step("Verifying source-data traceability")
     if not tr.get("results"):
         return None
-    step("Generating table")
+    step("Generating key insights")
     from synthesis import synthesize_cohorts
     synthesis = synthesize_cohorts(user_message, tr)
-    step("Generating key insights")
 
     return {
         "intent": "filtered_search", "tool_name": "search_cohorts",
@@ -776,22 +803,32 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
     # Route to text-to-SQL when the fixed search tool can't actually answer the question:
     #  (a) it extracted NO real filters (classifier didn't understand it), or
     #  (b) the question asks for an aggregate/analytic the search tool can't compute
-    #      ("average enrollment", "how many", "count by sponsor", "most/least", ...).
+    #      ("average enrollment", "count by sponsor", "most/least", "compare", ...).
     #      search_trials only returns a list of trials -- it can't average/group/rank.
+    #
+    # A BARE count word ("how many"/"count"/"number of"/"total number") is handled
+    # separately from true aggregation: when real filters exist, search_trials's own
+    # total_matches already answers "how many" -- and unlike a raw `SELECT COUNT(*)`,
+    # the tool_result already fetched above ALSO carries the actual matching trials,
+    # so the answer gets a real table + insights instead of a bare number with no way
+    # to see what was counted. Only escalate a bare count to SQL when there's nothing
+    # concrete to count (no filters at all).
     _filters = classification.get("filters", {})
     _msg = user_message.lower()
-    _AGG_WORDS = ("average", "avg", "mean", "median", "sum", "total number",
-                  "how many", "count", "number of", "most", "least", "fewest",
-                  "highest", "lowest", "top ", "rank", "group by", "per ",
-                  "distribution", "breakdown", "percentage", "proportion", "ratio",
-                  # comparative / analytic phrasings the fixed search tool can't do
-                  "more often", "less often", "compare", "comparison", "relationship",
-                  "correlat", "fraction of", "similar to", "vs ", "versus", "than ",
-                  "each ", "across all", "trend")
-    _wants_aggregate = any(w in _msg for w in _AGG_WORDS)
-    if intent == "filtered_search" and (
-        not any(v for v in _filters.values()) or _wants_aggregate
-    ):
+    _TRUE_AGG_WORDS = ("average", "avg", "mean", "median", "sum",
+                       "most", "least", "fewest",
+                       "highest", "lowest", "top ", "rank", "group by", "per ",
+                       "distribution", "breakdown", "percentage", "proportion", "ratio",
+                       # comparative / analytic phrasings the fixed search tool can't do
+                       "more often", "less often", "compare", "comparison", "relationship",
+                       "correlat", "fraction of", "similar to", "vs ", "versus", "than ",
+                       "each ", "across all", "trend")
+    _COUNT_WORDS = ("how many", "count", "number of", "total number")
+    _has_filters = any(v for v in _filters.values())
+    _wants_true_aggregate = any(w in _msg for w in _TRUE_AGG_WORDS)
+    _wants_bare_count = any(w in _msg for w in _COUNT_WORDS)
+    _wants_aggregate = _wants_true_aggregate or (_wants_bare_count and not _has_filters)
+    if intent == "filtered_search" and (not _has_filters or _wants_aggregate):
         _step("Translating your question into a database query")
         ts = _text_to_sql_response(user_message)
         if ts is not None:

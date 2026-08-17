@@ -131,7 +131,23 @@ function Cell({ col, row, onOpen }) {
   return <div style={base}>{raw ?? "—"}</div>;
 }
 
-export default function CohortTable({ data = [], onOpenSummary, title }) {
+// Base64 -> Blob -> anchor-click download, same pattern App.jsx already uses
+// for the server-rendered answer's own .dl-btn (atob + Blob + object URL).
+function downloadBase64(base64, filename, mimeType) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+export default function CohortTable({ data = [], onOpenSummary, title, xlsxBase64, xlsxFilename }) {
   const [openFilter, setOpenFilter] = useState(null);
   const [filters, setFilters] = useState({});
   const [page, setPage] = useState(1);
@@ -197,17 +213,33 @@ export default function CohortTable({ data = [], onOpenSummary, title }) {
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         {title ? <h3 style={{ ...CARD_TITLE, padding: 0, margin: 0 }}>{title}</h3> : <span />}
-        <button
-          type="button"
-          onClick={downloadCsv}
-          style={{
-            display: "flex", alignItems: "center", gap: 8, padding: "9px 16px",
-            background: "#fff", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 4,
-            font: `500 14px/18px ${FONT}`, color: C.headText, cursor: "pointer",
-          }}
-        >
-          Download CSV
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            onClick={downloadCsv}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "9px 16px",
+              background: "#fff", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 4,
+              font: `500 14px/18px ${FONT}`, color: C.headText, cursor: "pointer",
+            }}
+          >
+            Download CSV
+          </button>
+          {xlsxBase64 ? (
+            <button
+              type="button"
+              onClick={() => downloadBase64(xlsxBase64, xlsxFilename || "cohorts.xlsx", XLSX_MIME)}
+              title="Includes source-traceability notes on hover for Phase, Year, Status, N and Indication. Exports all cohorts (current filters aren't applied)."
+              style={{
+                display: "flex", alignItems: "center", gap: 8, padding: "9px 16px",
+                background: "#fff", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 4,
+                font: `500 14px/18px ${FONT}`, color: C.headText, cursor: "pointer",
+              }}
+            >
+              Download Excel
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div
