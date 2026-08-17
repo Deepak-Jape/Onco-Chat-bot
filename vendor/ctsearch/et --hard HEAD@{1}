@@ -1,0 +1,30 @@
+[33mfaff55c[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mhomepage_ajay[m[33m, [m[1;31morigin/homepage_ajay[m[33m)[m HEAD@{0}: pull origin homepage_ajay: Fast-forward
+[33m058ac6a[m HEAD@{1}: commit: made chnages in the home section and also 5 step auth
+[33mfc97a2c[m HEAD@{2}: commit: made all the changes for make the the privacy page dynamic and also created the login page
+[33mf40f16e[m HEAD@{3}: pull origin homepage_ajay: Fast-forward
+[33med1b9ef[m HEAD@{4}: commit: made changes in the Why Modern Oncology Teams page
+[33md054fa0[m HEAD@{5}: checkout: moving from deepak_work to homepage_ajay
+[33m979f94e[m[33m ([m[1;31morigin/deepak_work[m[33m, [m[1;32mdeepak_work[m[33m)[m HEAD@{6}: checkout: moving from main to deepak_work
+[33m47e67fd[m[33m ([m[1;32mmain[m[33m)[m HEAD@{7}: checkout: moving from deepak_work to main
+[33m979f94e[m[33m ([m[1;31morigin/deepak_work[m[33m, [m[1;32mdeepak_work[m[33m)[m HEAD@{8}: commit: created the whole page of privacypolicy
+[33m7a95070[m HEAD@{9}: checkout: moving from favourites_tab to deepak_work
+[33mfa4d3be[m[33m ([m[1;31morigin/favourites_tab[m[33m, [m[1;32mfavourites_tab[m[33m)[m HEAD@{10}: merge deepak_work: Merge made by the 'ort' strategy.
+[33m7ac8bf6[m HEAD@{11}: checkout: moving from deepak_work to favourites_tab
+[33m7a95070[m HEAD@{12}: commit: created all 5 pages for the favorite and also created header
+[33m900904d[m HEAD@{13}: commit: .
+[33m9700ab2[m HEAD@{14}: commit: made the changes in outcome page and also created the seeting page and also made changes in skeleton
+[33m66352ed[m HEAD@{15}: commit: .
+[33m79f4802[m HEAD@{16}: commit: made all the css related changes
+[33m3e69743[m HEAD@{17}: commit: made changes in the css and also created the new skelton for the outome page
+[33mced0df9[m HEAD@{18}: pull origin main: Merge made by the 'ort' strategy.
+[33ma09a229[m HEAD@{19}: commit: .
+[33m47e67fd[m[33m ([m[1;32mmain[m[33m)[m HEAD@{20}: merge main: Fast-forward
+[33m5e57e72[m HEAD@{21}: checkout: moving from main to deepak_work
+[33m47e67fd[m[33m ([m[1;32mmain[m[33m)[m HEAD@{22}: checkout: moving from deepak_work to main
+[33m5e57e72[m HEAD@{23}: checkout: moving from main to deepak_work
+[33m47e67fd[m[33m ([m[1;32mmain[m[33m)[m HEAD@{24}: commit: .
+[33m5c4181b[m HEAD@{25}: commit: .
+[33mc45ad9f[m HEAD@{26}: commit: created both pages risk and outcome and integrated the api
+[33m05e8e70[m HEAD@{27}: commit: .
+[33m5e57e72[m HEAD@{28}: commit: created both pages risk and outcome and integrated the api
+[33mbbfb6ae[m HEAD@{29}: clone: from https://github.com/Scalient-AI-Solutions-Pvt-Ltd/ctsearch.git

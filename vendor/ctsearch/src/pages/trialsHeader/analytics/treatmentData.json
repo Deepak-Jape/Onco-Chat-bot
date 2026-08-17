@@ -1,0 +1,479 @@
+{
+  "filters": {
+    "cancer_stage": ["Stage I", "Stage II", "Stage III", "Stage IV"],
+    "line_of_therapy": [
+      "1L",
+      "2L+",
+      "Maintenance",
+      "3L+",
+      "Not Specified",
+      "Neoadjuvant",
+      "Adjuvant"
+    ],
+    "phase": [
+      "Phase III",
+      "Phase IV",
+      "Phase I",
+      "Phase II",
+      "Not Applicable",
+      "Early Phase I"
+    ],
+    "countries": ["USA", "Germany", "UK", "India", "Japan"]
+  },
+
+  "chart_backbone": [
+    { "year": "2016", "IO": 60, "Chemo": 120, "ADC": 90 },
+    { "year": "2017", "IO": 110, "Chemo": 95, "ADC": 80 },
+    { "year": "2018", "IO": 90, "Chemo": 140, "ADC": 100 },
+    { "year": "2019", "IO": 75, "Chemo": 120, "ADC": 70 },
+    { "year": "2020", "IO": 50, "Chemo": 90, "ADC": 65 },
+    { "year": "2021", "IO": 70, "Chemo": 130, "ADC": 75 },
+    { "year": "2022", "IO": 120, "Chemo": 110, "ADC": 60 },
+    { "year": "2023", "IO": 85, "Chemo": 140, "ADC": 95 },
+    { "year": "2024", "IO": 130, "Chemo": 160, "ADC": 100 },
+    { "year": "2025", "IO": 115, "Chemo": 150, "ADC": 85 }
+  ],
+
+  "chart_moa": [
+    {
+      "year": "2016",
+      "IO": 60,
+      "Chemo": 120,
+      "ADC": 90,
+      "IO+IO": 40,
+      "IO+ADC": 70,
+      "IO+Chemo": 180,
+      "Chemo+ADC": 100,
+      "Chemo+Chemo": 65,
+      "ADC+ADC": 45,
+      "IO+Chemo+ADC": 40
+    },
+    {
+      "year": "2017",
+      "IO": 110,
+      "Chemo": 95,
+      "ADC": 80,
+      "IO+IO": 55,
+      "IO+ADC": 60,
+      "IO+Chemo": 200,
+      "Chemo+ADC": 90,
+      "Chemo+Chemo": 70,
+      "ADC+ADC": 50,
+      "IO+Chemo+ADC": 55
+    },
+    {
+      "year": "2018",
+      "IO": 90,
+      "Chemo": 140,
+      "ADC": 100,
+      "IO+IO": 60,
+      "IO+ADC": 85,
+      "IO+Chemo": 210,
+      "Chemo+ADC": 110,
+      "Chemo+Chemo": 75,
+      "ADC+ADC": 55,
+      "IO+Chemo+ADC": 60
+    },
+    {
+      "year": "2019",
+      "IO": 75,
+      "Chemo": 120,
+      "ADC": 70,
+      "IO+IO": 50,
+      "IO+ADC": 80,
+      "IO+Chemo": 220,
+      "Chemo+ADC": 95,
+      "Chemo+Chemo": 60,
+      "ADC+ADC": 45,
+      "IO+Chemo+ADC": 50
+    },
+    {
+      "year": "2020",
+      "IO": 50,
+      "Chemo": 90,
+      "ADC": 65,
+      "IO+IO": 45,
+      "IO+ADC": 60,
+      "IO+Chemo": 180,
+      "Chemo+ADC": 85,
+      "Chemo+Chemo": 55,
+      "ADC+ADC": 40,
+      "IO+Chemo+ADC": 45
+    },
+    {
+      "year": "2021",
+      "IO": 70,
+      "Chemo": 130,
+      "ADC": 75,
+      "IO+IO": 65,
+      "IO+ADC": 100,
+      "IO+Chemo": 200,
+      "Chemo+ADC": 105,
+      "Chemo+Chemo": 70,
+      "ADC+ADC": 55,
+      "IO+Chemo+ADC": 65
+    },
+    {
+      "year": "2022",
+      "IO": 120,
+      "Chemo": 110,
+      "ADC": 60,
+      "IO+IO": 70,
+      "IO+ADC": 90,
+      "IO+Chemo": 230,
+      "Chemo+ADC": 80,
+      "Chemo+Chemo": 65,
+      "ADC+ADC": 50,
+      "IO+Chemo+ADC": 70
+    },
+    {
+      "year": "2023",
+      "IO": 85,
+      "Chemo": 140,
+      "ADC": 95,
+      "IO+IO": 60,
+      "IO+ADC": 70,
+      "IO+Chemo": 190,
+      "Chemo+ADC": 120,
+      "Chemo+Chemo": 80,
+      "ADC+ADC": 60,
+      "IO+Chemo+ADC": 60
+    },
+    {
+      "year": "2024",
+      "IO": 130,
+      "Chemo": 160,
+      "ADC": 100,
+      "IO+IO": 75,
+      "IO+ADC": 95,
+      "IO+Chemo": 210,
+      "Chemo+ADC": 140,
+      "Chemo+Chemo": 90,
+      "ADC+ADC": 65,
+      "IO+Chemo+ADC": 75
+    },
+    {
+      "year": "2025",
+      "IO": 115,
+      "Chemo": 150,
+      "ADC": 85,
+      "IO+IO": 70,
+      "IO+ADC": 105,
+      "IO+Chemo": 220,
+      "Chemo+ADC": 125,
+      "Chemo+Chemo": 85,
+      "ADC+ADC": 60,
+      "IO+Chemo+ADC": 80
+    }
+  ],
+
+  "chart_regimen": [
+    {
+      "year": "2016",
+      "IO": 20,
+      "IO+ADC": 15,
+      "IO+IO": 10,
+      "IO+Chemo": 10,
+      "IO+Chemo+ADC": 5
+    },
+    {
+      "year": "2017",
+      "IO": 30,
+      "IO+ADC": 20,
+      "IO+IO": 15,
+      "IO+Chemo": 20,
+      "IO+Chemo+ADC": 10
+    },
+    {
+      "year": "2018",
+      "IO": 25,
+      "IO+ADC": 25,
+      "IO+IO": 15,
+      "IO+Chemo": 15,
+      "IO+Chemo+ADC": 10
+    },
+    {
+      "year": "2019",
+      "IO": 20,
+      "IO+ADC": 20,
+      "IO+IO": 15,
+      "IO+Chemo": 10,
+      "IO+Chemo+ADC": 10
+    },
+    {
+      "year": "2020",
+      "IO": 15,
+      "IO+ADC": 15,
+      "IO+IO": 10,
+      "IO+Chemo": 5,
+      "IO+Chemo+ADC": 5
+    },
+    {
+      "year": "2021",
+      "IO": 20,
+      "IO+ADC": 25,
+      "IO+IO": 15,
+      "IO+Chemo": 15,
+      "IO+Chemo+ADC": 10
+    },
+    {
+      "year": "2022",
+      "IO": 35,
+      "IO+ADC": 25,
+      "IO+IO": 20,
+      "IO+Chemo": 25,
+      "IO+Chemo+ADC": 15
+    },
+    {
+      "year": "2023",
+      "IO": 25,
+      "IO+ADC": 20,
+      "IO+IO": 15,
+      "IO+Chemo": 15,
+      "IO+Chemo+ADC": 10
+    },
+    {
+      "year": "2024",
+      "IO": 40,
+      "IO+ADC": 25,
+      "IO+IO": 20,
+      "IO+Chemo": 25,
+      "IO+Chemo+ADC": 20
+    },
+    {
+      "year": "2025",
+      "IO": 35,
+      "IO+ADC": 30,
+      "IO+IO": 20,
+      "IO+Chemo": 20,
+      "IO+Chemo+ADC": 15
+    }
+  ],
+  
+  "sub_category_map": {
+    "adc": [
+      "adc",
+      "adc + io",
+      "adc + chemo"
+    ],
+    "chemo": [
+      "chemo",
+      "io + chemo",
+      "chemo + targeted"
+    ],
+    "targeted": [
+      "targeted",
+      "targeted + chemo"
+    ],
+    "vaccine": [
+      "vaccine",
+      "vaccine + chemo"
+    ],
+    "cell therapy": [
+      "cell therapy",
+      "cell therapy + gene therapy",
+      "cell therapy + gene therapy + targeted",
+      "cell therapy + vaccine"
+    ],
+    "gene therapy": [
+      "gene therapy",
+      "gene therapy + vaccine"
+    ],
+    "hormonal": [
+      "hormonal"
+    ],
+    "radiotherapy": [
+      "radiotherapy"
+    ],
+    "radiopharmaceutical": [
+      "radiopharmaceutical"
+    ],
+    "steroids": [
+      "steroids"
+    ],
+    "palliative": [
+      "palliative"
+    ],
+    "other": [
+      "other"
+    ],
+    "not specified": [
+      "not specified"
+    ]
+  },
+  "associated_regimens": {
+    "IO": ["IO", "IO + ADC", "IO + IO", "IO + Chemo + ADC"],
+    "Chemo": [
+      "Chemo",
+      "Chemo + ADC",
+      "Chemo + Chemo",
+      "IO + Chemo",
+      "IO + Chemo + ADC"
+    ],
+    "ADC": ["ADC", "ADC + ADC", "IO + ADC", "Chemo + ADC", "IO + Chemo + ADC"],
+    "IO+IO": ["IO + IO", "IO + IO + Chemo", "IO + IO + ADC"],
+    "IO+ADC": ["IO + ADC", "IO + ADC + ADC", "IO + Chemo + ADC"],
+    "IO+Chemo": ["IO + Chemo", "IO + Chemo + ADC", "IO + Chemo + Chemo"],
+    "Chemo+ADC": ["Chemo + ADC", "Chemo + ADC + ADC", "IO + Chemo + ADC"],
+    "Chemo+Chemo": ["Chemo + Chemo", "Chemo + Chemo + ADC"],
+    "ADC+ADC": ["ADC + ADC", "ADC + ADC + IO"],
+    "IO+Chemo+ADC": [
+      "IO + Chemo + ADC",
+      "IO + IO + Chemo + ADC",
+      "Chemo + ADC + ADC"
+    ]
+  },
+    "bubble_chart": [
+    { "backbone": "IO", "sae": 1.2, "orr": 68, "trials": 820, "n": 40 },
+    { "backbone": "Chemo", "sae": 2.5, "orr": 48, "trials": 600, "n": 32 },
+    { "backbone": "ADC", "sae": 1.8, "orr": 52, "trials": 460, "n": 28 },
+    { "backbone": "IO+IO", "sae": 2.6, "orr": 58, "trials": 580, "n": 25 },
+    { "backbone": "IO+ADC", "sae": 1.6, "orr": 44, "trials": 480, "n": 18 },
+    { "backbone": "IO+Chemo", "sae": 2.2, "orr": 72, "trials": 870, "n": 50 },
+    { "backbone": "Chemo+ADC", "sae": 2.8, "orr": 35, "trials": 320, "n": 14 },
+    {
+      "backbone": "Chemo+Chemo",
+      "sae": 3.1,
+      "orr": 25,
+      "trials": 210,
+      "n": 10
+    },
+    { "backbone": "ADC+ADC", "sae": 1.3, "orr": 40, "trials": 260, "n": 12 },
+    {
+      "backbone": "IO+Chemo+ADC",
+      "sae": 2.0,
+      "orr": 75,
+      "trials": 910,
+      "n": 60
+    }
+  ],
+
+  "efficacyvssafety": [
+   {
+    "backbone": [
+      "Chemo+Chemo",
+      "Chemo+Targeted",
+      "Unknown",
+      "IO+Chemo",
+      "Targeted+Targeted",
+      "Chemo+Anti-angiogenic",
+      "IO+IO",
+      "CellTherapy+IO",
+      "Chemo+RT",
+      "IO+Targeted",
+      "Targeted+IO",
+      "IO+ADC",
+      "IO+Vaccine",
+      "Not applicable",
+      "IO+RT",
+      "Targeted+Anti-angiogenic",
+      "IO+TKI",
+      "CellTherapy+Chemo",
+      "ADC+IO",
+      "Targeted+RT",
+      "Endocrine+CDK4/6",
+      "IO+CRT",
+      "Targeted+ADC",
+      "RT+Targeted",
+      "Chemo+CRT",
+      "Chemo+TKI",
+      "ADC+Targeted",
+      "Targeted+CRT",
+      "ADC+Chemo",
+      "Targeted+PARP",
+      "Targeted+Endocrine",
+      "Targeted+Chemo",
+      "IO",
+      "Chemo+Vaccine",
+      "Targeted+CDK4/6",
+      "Chemo",
+      "IO+Chemo+RT"
+    ],
+    
+    "metrics": {
+      "x_axis": ["OTHER", "SERIOUS", "Unknown"],
+      "y_axis": [
+        "OS",
+        "DLT",
+        "AE Rate",
+        "PFS",
+        "MTD",
+        "ORR",
+        "RP2D",
+        "PD Biomarkers",
+        "SAE Rate",
+        "pCR",
+        "EFS",
+        "Unknown",
+        "TTP",
+        "DCR",
+        "PR",
+        "TTF",
+        "CR",
+        "IFN-γ",
+        "DFS",
+        "HRQoL",
+        "RFS",
+        "PRO-SI"
+      ]
+    
+  },
+ "chart":{
+
+
+  
+    "points": [
+      { 
+        "treatment_id": "NCT00050960",
+        "OS": 8.85,
+        "n": 8060,
+        "price_range":10,
+        "OTHER": 4.09,
+        "phase": "Phase III",
+        "backbone": "Chemo+Chemo",
+        "line_of_therapy": "1L"
+      },
+      {
+        "treatment_id": "NCT03626545",
+        "DLT": 24.31,
+        "n": 4225,
+        "OTHER": 78.52,
+        "phase": "Phase III",
+        "backbone": "Chemo+Targeted",
+        "line_of_therapy": "2L+"
+      },
+      {
+        "treatment_id": "NCT03626545",
+        "OS": 54.31,
+        "n": 1225,
+        "SERIOUS": 74.91,
+        "phase": "Phase III",
+        "backbone": "Unknown",
+        "line_of_therapy": "2L+"
+      },
+      {
+        "treatment_id": "NCT01588184",
+        "AE Rate": 41.32,
+        "n": 95,
+        "OTHER": 38.19,
+        "phase": "Phase IV",
+        "backbone": "Unknown",
+        "line_of_therapy": "Maintenance"
+      },  
+      
+      {
+        "treatment_id": "NCT06646276",
+        "Unknown": 50,
+        "n": 2120,
+        "phase": "Phase III",
+        "backbone": "IO+Chemo",
+        "line_of_therapy": "1L"
+      }
+    
+     
+    ]
+  },
+  "summary": 937
+}
+  ]
+}

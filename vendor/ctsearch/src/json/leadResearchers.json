@@ -1,0 +1,200 @@
+{
+  "meta": {
+    "totalLeadResearchers": 532,
+    "currentPage": 1,
+    "totalPages": 50,
+    "perPage": 4
+  },
+  "leadResearchers": [
+    {
+      "id": "jane-smith",
+      "name": "Dr. Jane Smith",
+      "initials": "JS",
+      "location": "Houston, TX",
+      
+      "contact": {
+        "email": "jane.smith@mdacc.org",
+        "phone": "+1 928 550 6088"
+      },
+      
+      "cardStats": {
+        "activeTrialsFiltered": 12,
+        "totalTrials": 25
+      },
+      "performance": {
+        "recruitSpeed": 30,
+        "dropoutRate": 4,
+        "enrollTarget": 69,
+        "completionRate": 78
+      },
+      "trialsOverTime": {
+        "annual": [
+          { "year": 2020, "total": 10, "p1": 4, "p2": 6, "p3": 5 },
+          { "year": 2021, "total": 12, "p1": 5, "p2": 7, "p3": 6 },
+          { "year": 2022, "total": 18, "p1": 6, "p2": 8, "p3": 6 },
+          { "year": 2023, "total": 22, "p1": 7, "p2": 9, "p3": 8 },
+          { "year": 2024, "total": 40, "p1": 8, "p2": 10, "p3": 9 }
+        ],
+        "quarterly": [
+          { "quarter": "2024-Q1", "total": 6, "p1": 2, "p2": 2, "p3": 2 },
+          { "quarter": "2024-Q2", "total": 7, "p1": 2, "p2": 3, "p3": 2 },
+          { "quarter": "2024-Q3", "total": 7, "p1": 2, "p2": 3, "p3": 2 },
+          { "quarter": "2024-Q4", "total": 7, "p1": 2, "p2": 3, "p3": 2 }
+        ]
+      },
+      "trialsByPhase": [9, 7, 5, 4],
+      "topSponsors": [
+        { "name": "Pharma Corp", "total": 22, "p1": 5, "p2": 4, "p3": 6, "p4": 7 },
+        { "name": "BioInnovate", "total": 18, "p1": 4, "p2": 5, "p3": 5, "p4": 4 },
+        { "name": "Genetech", "total": 15, "p1": 3, "p2": 4, "p3": 5, "p4": 3 },
+        { "name": "Pfizer", "total": 12, "p1": 2, "p2": 3, "p3": 4, "p4": 3 },
+        { "name": "Novartis", "total": 7, "p1": 1, "p2": 2, "p3": 2, "p4": 2 }
+      ]
+    },
+    {
+      "id": "robert-lee",
+      "name": "Dr. Robert Lee",
+      "initials": "RL",
+      "location": "Houston, TX",
+      "institution": "Memorial Hermann",
+      "specialty": "Thoracic Oncology",
+      "contact": {
+        "email": "robert.lee@mh.org",
+        "phone": "+1 713 555 0182"
+      },
+      "focusAreas": [
+        "Lung Cancer",
+        "Targeted Therapies"
+      ],
+      "cardStats": {
+        "activeTrialsFiltered": 18,
+        "totalTrials": 32
+      },
+      "performance": {
+        "recruitSpeed": 26,
+        "dropoutRate": 5,
+        "enrollTarget": 64,
+        "completionRate": 81
+      },
+      "trialsOverTime": {
+        "annual": [
+          { "year": 2020, "total": 12, "p1": 3, "p2": 4, "p3": 5 },
+          { "year": 2021, "total": 15, "p1": 4, "p2": 5, "p3": 6 },
+          { "year": 2022, "total": 19, "p1": 5, "p2": 7, "p3": 7 },
+          { "year": 2023, "total": 23, "p1": 6, "p2": 9, "p3": 8 },
+          { "year": 2024, "total": 25, "p1": 7, "p2": 9, "p3": 9 }
+        ],
+        "quarterly": [
+          { "quarter": "2024-Q1", "total": 6, "p1": 2, "p2": 2, "p3": 2 },
+          { "quarter": "2024-Q2", "total": 6, "p1": 2, "p2": 2, "p3": 2 },
+          { "quarter": "2024-Q3", "total": 6, "p1": 1, "p2": 3, "p3": 2 },
+          { "quarter": "2024-Q4", "total": 7, "p1": 2, "p2": 2, "p3": 3 }
+        ]
+      },
+      "trialsByPhase": [8, 9, 7, 8],
+      "topSponsors": [
+        { "name": "AstraZeneca", "total": 19, "p1": 4, "p2": 6, "p3": 5, "p4": 4 },
+        { "name": "Merck", "total": 16, "p1": 3, "p2": 5, "p3": 5, "p4": 3 },
+        { "name": "Genentech", "total": 14, "p1": 3, "p2": 4, "p3": 4, "p4": 3 },
+        { "name": "BMS", "total": 11, "p1": 2, "p2": 3, "p3": 3, "p4": 3 }
+      ]
+    },
+    {
+      "id": "priya-nair",
+      "name": "Dr. Priya Nair",
+      "initials": "PN",
+      "location": "Houston, TX",
+      "institution": "Houston Methodist",
+      "specialty": "Hematology | Rare Blood Disorders",
+      "contact": {
+        "email": "priya.nair@hmh.org",
+        "phone": "+1 832 555 0109"
+      },
+      "focusAreas": [
+        "Cell & Gene Therapy",
+        "Pediatric Programs"
+      ],
+      "cardStats": {
+        "activeTrialsFiltered": 9,
+        "totalTrials": 15
+      },
+      "performance": {
+        "recruitSpeed": 18,
+        "dropoutRate": 3,
+        "enrollTarget": 72,
+        "completionRate": 85
+      },
+      "trialsOverTime": {
+        "annual": [
+          { "year": 2020, "total": 8, "p1": 2, "p2": 3, "p3": 3 },
+          { "year": 2021, "total": 9, "p1": 2, "p2": 3, "p3": 4 },
+          { "year": 2022, "total": 11, "p1": 3, "p2": 4, "p3": 4 },
+          { "year": 2023, "total": 13, "p1": 4, "p2": 4, "p3": 5 },
+          { "year": 2024, "total": 14, "p1": 4, "p2": 5, "p3": 5 }
+        ],
+        "quarterly": [
+          { "quarter": "2024-Q1", "total": 3, "p1": 1, "p2": 1, "p3": 1 },
+          { "quarter": "2024-Q2", "total": 4, "p1": 1, "p2": 1, "p3": 2 },
+          { "quarter": "2024-Q3", "total": 4, "p1": 1, "p2": 2, "p3": 1 },
+          { "quarter": "2024-Q4", "total": 3, "p1": 1, "p2": 1, "p3": 1 }
+        ]
+      },
+      "trialsByPhase": [5, 4, 3, 3],
+      "topSponsors": [
+        { "name": "Novartis", "total": 12, "p1": 3, "p2": 3, "p3": 3, "p4": 3 },
+        { "name": "Janssen", "total": 9, "p1": 2, "p2": 2, "p3": 3, "p4": 2 },
+        { "name": "Sanofi", "total": 7, "p1": 1, "p2": 2, "p3": 2, "p4": 2 }
+      ]
+    },
+    {
+      "id": "amelia-choi",
+      "name": "Dr. Amelia Choi",
+      "initials": "AC",
+      "location": "Austin, TX",
+      "institution": "Dell Medical School",
+      "specialty": "Neuro-Oncology",
+      "contact": {
+        "email": "amelia.choi@utexas.edu",
+        "phone": "+1 737 555 9911"
+      },
+      "focusAreas": [
+        "Glioblastoma",
+        "Adaptive Trial Designs"
+      ],
+      "cardStats": {
+        "activeTrialsFiltered": 7,
+        "totalTrials": 19
+      },
+      "performance": {
+        "recruitSpeed": 22,
+        "dropoutRate": 6,
+        "enrollTarget": 66,
+        "completionRate": 74
+      },
+      "trialsOverTime": {
+        "annual": [
+          { "year": 2020, "total": 9, "p1": 2, "p2": 4, "p3": 3 },
+          { "year": 2021, "total": 10, "p1": 2, "p2": 4, "p3": 4 },
+          { "year": 2022, "total": 12, "p1": 3, "p2": 5, "p3": 4 },
+          { "year": 2023, "total": 16, "p1": 4, "p2": 6, "p3": 6 },
+          { "year": 2024, "total": 18, "p1": 4, "p2": 7, "p3": 7 }
+        ],
+        "quarterly": [
+          { "quarter": "2024-Q1", "total": 4, "p1": 1, "p2": 2, "p3": 1 },
+          { "quarter": "2024-Q2", "total": 5, "p1": 1, "p2": 2, "p3": 2 },
+          { "quarter": "2024-Q3", "total": 5, "p1": 1, "p2": 2, "p3": 2 },
+          { "quarter": "2024-Q4", "total": 4, "p1": 1, "p2": 1, "p3": 2 }
+        ]
+      },
+      "trialsByPhase": [6, 5, 4, 4],
+      "topSponsors": [
+        { "name": "Takeda", "total": 11, "p1": 2, "p2": 4, "p3": 3, "p4": 2 },
+        { "name": "Roche", "total": 9, "p1": 2, "p2": 3, "p3": 3, "p4": 1 },
+        { "name": "AbbVie", "total": 8, "p1": 2, "p2": 3, "p3": 2, "p4": 1 }
+      ]
+    }
+  ]
+}
+
+
+

@@ -1,0 +1,161 @@
+.ti-usecases {
+  width: 100%;
+  background: rgba(255, 255, 255, 1);
+}
+
+.ti-usecases__inner {
+  width: 100%;
+  padding: 56px 0 64px;
+  text-align: center;
+}
+
+.ti-usecases__title {
+  margin: 0;
+  font-family: Rubik;
+  font-size: clamp(28px, 3vw, 42px);
+  font-weight: 500;
+  line-height: 1.2;
+  color: rgba(0, 0, 0, 0.8);
+}
+
+.ti-usecases__subtitle {
+  margin: 10px auto 0;
+  max-width: 760px;
+  font-family: Rubik;
+  font-size: 18px;
+  line-height: 24px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.ti-usecases__grid {
+  margin: 34px auto 0;
+  max-width: var(--onco-container-7xl, 80rem);
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  text-align: left;
+  justify-content: stretch;
+}
+
+.ti-usecases__card {
+  background: rgba(255, 255, 255, 1);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 4px 4px 20px rgba(130, 143, 169, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Text block above the divider. */
+.ti-usecases__content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ti-usecases__cardTitle {
+  font-family: Rubik;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: "130%";
+  color: rgba(0, 0, 0, 0.8);
+}
+
+.ti-usecases__cardBody {
+  font-family: Rubik;
+  font-size: 16px;
+  line-height: 24px;
+  color: rgba(0, 0, 0, 0.6);
+  /* Reserve 3 lines (the longest body in the set) so "The Specifics" starts
+     at the same height in every card of a row, regardless of how many lines
+     the body actually wraps to. */
+  min-height: 72px;
+}
+
+.ti-usecases__label {
+  font-family: Rubik;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  color: rgba(0, 0, 0, 0.8);
+}
+
+.ti-usecases__text {
+  font-family: Rubik;
+  font-size: 16px;
+  line-height: 24px;
+  color: rgba(0, 0, 0, 0.6);
+  flex: 0 0 auto;
+  /* Sit closer to its "The Specifics" label than the 12px flex gap allows. */
+  margin-top: -6px;
+}
+
+/* Sits directly under the content — no auto margin, so the Outcome follows
+   "The Specifics" closely as in the design instead of being pushed to the
+   bottom of a fixed-height card. */
+.ti-usecases__bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ti-usecases__outcome {
+  font-family: Rubik;
+  font-size: 16px;
+  line-height: 24px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.ti-usecases__divider {
+  width: 100%;
+  height: 0;
+  background: transparent;
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.ti-usecases__outcomeLabel {
+  font-weight: 500;
+  color: rgba(38, 102, 190, 1);
+}
+
+.ti-usecases__outcomeText {
+  color: rgba(0, 0, 0, 0.6);
+}
+
+@media (max-width: 1180px) {
+  .ti-usecases__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ti-usecases__card {
+    width: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  .ti-usecases__grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Single column — there is no sibling to align with, so let the body hug
+     its own text instead of reserving 3 lines. */
+  .ti-usecases__cardBody {
+    min-height: 0;
+  }
+}
+
+/* iPad mini (portrait/landscape touch): ensure cards don't touch screen edges. */
+@media (hover: none) and (pointer: coarse) and (min-width: 720px) and (max-width: 820px) {
+  .ti-usecases__inner.onco-container-7xl {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+}
+
+@media (max-width: 700px) {
+  .ti-usecases__inner {
+    padding: 44px 18px 52px;
+  }
+}

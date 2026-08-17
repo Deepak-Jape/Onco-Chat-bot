@@ -1,0 +1,92 @@
+[
+  {
+    "id": 123,
+    "trial_name": "Pembrolizumab in KRAS G12C-Mutated Non-Small Cell Lung Cancer",
+    "regimen": "Pembrolizumab",
+    "countries": ["US", "BR", "AU", "ZA"],
+    "patients_per_month": 1.12,
+    "sites": 10,
+    "planned": 136,
+    "completed": 453
+  },
+  {
+    "id": 124,
+    "trial_name": "Nivolumab plus Ipilimumab for Melanoma",
+    "regimen": "Cisplatin",
+    "countries": ["MX", "AU"],
+    "patients_per_month": 0.6,
+    "sites": 20,
+    "planned": 345,
+    "completed": 465
+  },
+  {
+    "id": 125,
+    "trial_name": "Atezolizumab in Triple-Negative Breast Cancer",
+    "regimen": "Pembrolizumab",
+    "countries": ["IN"],
+    "patients_per_month": 0.95,
+    "sites": 24,
+    "planned": 256,
+    "completed": 394
+  },
+  {
+    "id": 126,
+    "trial_name": "Durvalumab for NSCLC",
+    "regimen": "Cisplatin",
+    "countries": ["BR", "IN"],
+    "patients_per_month": 1.31,
+    "sites": 26,
+    "planned": 126,
+    "completed": 213
+  },
+  {
+    "id": 127,
+    "trial_name": "Trastuzumab in HER2-Positive Breast Cancer",
+    "regimen": "Pembrolizumab",
+    "countries": ["DE", "CA"],
+    "patients_per_month": 1.62,
+    "sites": 18,
+    "planned": 241,
+    "completed": 452
+  },
+  {
+    "id": 128,
+    "trial_name": "Rituximab in Non-Hodgkin Lymphoma",
+    "regimen": "Cisplatin",
+    "countries": ["AU"],
+    "patients_per_month": 0.87,
+    "sites": 32,
+    "planned": 245,
+    "completed": 124
+  },
+  {
+    "id": 129,
+    "trial_name": "Olaparib in BRCA-Mutated Ovarian Cancer",
+    "regimen": "Pembrolizumab",
+    "countries": ["MX"],
+    "patients_per_month": 0.78,
+    "sites": 19,
+    "planned": 156,
+    "completed": 213
+  },
+  {
+    "id": 130,
+    "trial_name": "Vemurafenib in BRAF-Mutated Melanoma",
+    "regimen": "Cisplatin",
+    "countries": ["US", "BR", "JP"],
+    "patients_per_month": 0.95,
+    "sites": 30,
+    "planned": 156,
+    "completed": 321
+  },
+  {
+    "id": 131,
+    "trial_name": "Vemurafenib in BRAF-Mutated Melanoma",
+    "regimen": "Pembrolizumab",
+    "countries": ["CA"],
+    "patients_per_month": 0.98,
+    "sites": 40,
+    "planned": 264,
+    "completed": 348
+  }
+]

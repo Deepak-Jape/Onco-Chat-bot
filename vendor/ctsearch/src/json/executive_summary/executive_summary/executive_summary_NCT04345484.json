@@ -1,0 +1,368 @@
+{
+    "top_info": {
+        "title": null,
+        "value": {
+            "nctid": {
+                "title": "NCT ID",
+                "value": "NCT00445146"
+            },
+            "study_title": {
+                "title": "Study Title",
+                "value": "A Phase 2, Open-Label, Multicenter Study of the Safety of Ritonavir-Boosted GS-9137 (GS-9137/r) Administered in Combination With Other Antiretroviral Agents for the Treatment of HIV-1 Infected Subjects"
+            },
+            "sponsor": {
+                "title": "Sponsor",
+                "value": "Gilead Sciences"
+            },
+            "latest_update": {
+                "title": "Latest Update",
+                "value": "2016-03-23"
+            },
+            "reporting_unit": {
+                "title": "Reporting Unit",
+                "value": "Gilead Sciences"
+            },
+            "status": {
+                "title": "Status",
+                "value": "Completed"
+            },
+            "phase": {
+                "title": "Phase",
+                "value": "Phase-II (single-arm)"
+            },
+            "condition": {
+                "title": "Condition",
+                "value": "HIV Infections"
+            }
+        }
+    },
+    "study_details": {
+        "trial_quality_scores": {
+            "title": "Trial Quality Scores",
+            "value": {
+                "evidence_strength": {
+                    "title": "Evidence Strength",
+                    "value": "Not Available"
+                },
+                "operational_feasibility": {
+                    "title": "Operational Feasibility",
+                    "value": "Not Available"
+                },
+                "differentiation_index": {
+                    "title": "Differentiation Index",
+                    "value": "Not Available"
+                }
+            }
+        },
+        "study_at_a_glance": {
+            "title": "Study at a glance",
+            "value": {
+                "enrollment": {
+                    "title": "Enrollment",
+                    "value": "Planned: Not Available, Completed: 192"
+                },
+                "sites": {
+                    "title": "Sites",
+                    "value": {
+                        "countries": "United States, Puerto Rico",
+                        "sites": "48 (United States: 47, Puerto Rico: 1)"
+                    }
+                },
+                "intervention": {
+                    "title": "Intervention",
+                    "value": {
+                        "type": "DRUG",
+                        "description": "Elvitegravir (EVG) tablet administered orally once daily with food, Ritonavir (RTV) 100 mg capsule administered orally once daily with food, and an investigator-selected antiretroviral (ARV) regimen."
+                    }
+                },
+                "population": {
+                    "title": "Population",
+                    "value": {
+                        "exclusion": "Females who are pregnant or breastfeeding. Participation in any other clinical trial without prior approval from the Sponsor. Any other clinical condition or prior therapy that, in the opinion of the investigator, would make the subject unsuitable for the study. Subjects receiving ongoing therapy with contraindicated drugs.",
+                        "inclusion": "Completion of a prior EVG+RTV treatment study without treatment-limiting toxicity. Males and females of childbearing potential must agree to utilize effective contraception methods. Ability to understand and sign a written informed consent form."
+                    }
+                },
+                "comparator": {
+                    "title": "Comparator",
+                    "value": {
+                        "type": "Not Available",
+                        "description": "This was a single-group assignment study with no comparator arm."
+                    }
+                },
+                "primary_endpoint": {
+                    "title": "Primary Endpoint",
+                    "value": "Percentage of Participants Experiencing Any Treatment-Emergent Study Dug-Related Adverse Event"
+                },
+                "patient_segment": {
+                    "title": "Patient Segment",
+                    "value": "HIV-1 infected subjects who have completed a prior Elvitegravir (EVG) + Ritonavir (RTV) treatment study."
+                }
+            }
+        },
+        "operational_metrics": {
+            "title": "Operational Metrics",
+            "value": {
+                "recruitment_rate": {
+                    "title": "Recruitment Rate",
+                    "value": "2.0 patients/month"
+                },
+                "dropout_rate": {
+                    "title": "Dropout Rate",
+                    "value": "61.98%"
+                },
+                "predictability": {
+                    "title": "Predictability",
+                    "value": "Not Available"
+                },
+                "completion_rate": {
+                    "title": "Completion Rate",
+                    "value": "38.02%"
+                }
+            }
+        },
+        "timeline": {
+            "title": "Timeline",
+            "value": {
+                "commencement": {
+                    "title": "Commencement",
+                    "value": "2007-02"
+                },
+                "first_submission": {
+                    "title": "First Submission",
+                    "value": "2007-02-28"
+                },
+                "primary_completion": {
+                    "title": "Primary Completion",
+                    "value": "2015-03"
+                },
+                "completion": {
+                    "title": "Completion",
+                    "value": "2015-03"
+                },
+                "results_published": {
+                    "title": "Results Published",
+                    "value": "2016-04-25"
+                }
+            }
+        },
+        "strategic_implication": {
+            "title": "Strategic Implications",
+            "value": {
+                "regulatory_risk": {
+                    "title": "Regulatory / Commercial Risks",
+                    "value": [
+                        "Unexpected long-term safety issues emerging in the open-label extension.",
+                        "Difficulty in demonstrating a superior safety profile compared to existing ARV regimens due to the single-arm design.",
+                        "Regulatory scrutiny over the open-label, non-comparative design for a long-term safety assessment."
+                    ]
+                },
+                "execution_risk": {
+                    "title": "Execution Risks",
+                    "value": [
+                        "High patient dropout rate (61.98%) affecting the robustness and interpretation of long-term safety data.",
+                        "Maintaining patient engagement and adherence over a very long follow-up period (up to 408 weeks).",
+                        "Managing data consistency and operational logistics across 48 sites in the US and Puerto Rico."
+                    ]
+                },
+                "strategic_options": {
+                    "title": "Strategic Options",
+                    "value": [
+                        "Implement robust patient retention programs and incentives to minimize dropouts in future long-term studies.",
+                        "Conduct frequent interim safety analyses to monitor for emerging adverse events proactively.",
+                        "Design future studies with a comparator arm to provide more definitive evidence of safety and efficacy."
+                    ]
+                }
+            }
+        },
+        "design_summary": {
+            "title": "Design Summary",
+            "value": {
+                "study_phase": {
+                    "title": "Study Phase",
+                    "value": "PHASE2"
+                },
+                "primary_purpose": {
+                    "title": "Primary Purpose",
+                    "value": "TREATMENT"
+                },
+                "indication": {
+                    "title": "Indication",
+                    "value": "HIV Infections"
+                },
+                "study_type": {
+                    "title": "Study Type",
+                    "value": "INTERVENTIONAL"
+                },
+                "interventional_model": {
+                    "title": "Interventional Model",
+                    "value": "SINGLE_GROUP"
+                },
+                "type_of_control": {
+                    "title": "Type of Control",
+                    "value": "Not Available"
+                },
+                "study_blinding": {
+                    "title": "Study Blinding",
+                    "value": "NONE"
+                },
+                "blinding_roles": {
+                    "title": "Blinding Roles",
+                    "value": "Not Available"
+                },
+                "estimated_duration": {
+                    "title": "Estimated Duration",
+                    "value": "8 years, 1 month"
+                }
+            }
+        },
+        "methodology": {
+            "title": "Methodology",
+            "value": [
+                {
+                    "name": "EVG+RTV",
+                    "dosage": "EVG 85 mg or 150 mg + RTV + ARV regimen. Participants receiving lopinavir/ritonavir (LPV/r) or atazanavir/ritonavir (ATV/r) as part of their ARV regimen will receive EVG 85 mg and all other participants will receive EVG 150 mg. Some participants may receive EVG 300 mg.",
+                    "schedule": "EVG and RTV administered orally once daily with food.",
+                    "duration": "For the duration of the study",
+                    "count": 192
+                }
+            ]
+        },
+        "endpoints": {
+            "title": "Endpoints",
+            "value": {
+                "primary_endpoints": {
+                    "title": "Primary Endpoints",
+                    "value": [
+                        "Percentage of Participants Experiencing Any Treatment-Emergent Study Dug-Related Adverse Event"
+                    ]
+                },
+                "secondary_endpoints": {
+                    "title": "Secondary Endpoints",
+                    "value": [
+                        "Percentage of Participants Experiencing Treatment-Emergent Adverse Events",
+                        "Percentage of Participants Experiencing Any Treatment-Emergent Laboratory Abnormality",
+                        "Percentage of Participants Experiencing Any Marked Treatment-Emergent Laboratory Abnormality",
+                        "Hemoglobin at Baseline and Change From Baseline at Weeks 24, 48, 96, 144, 192, 240, 288, 336, and 384",
+                        "Red Blood Cell (RBC) Count at Baseline and Change From Baseline at Weeks 24, 48, 96, 144, 192, 240, 288, 336, and 384",
+                        "White Blood Cell (WBC) Count at Baseline and Change From Baseline at Weeks 24, 48, 96, 144, 192, 240, 288, 336, and 384",
+                        "Platelet Count at Baseline and Change From Baseline at Weeks 24, 48, 96, 144, 192, 240, 288, 336, and 384",
+                        "Alkaline Phosphatase at Baseline and Change From Baseline at Weeks 24, 48, 96, 144, 192, 240, 288, 336, and 384",
+                        "Alanine Aminotransferase (ALT) at Baseline and Change From Baseline at Weeks 24, 48, 96, 144, 192, 240, 288, 336, and 384",
+                        "Aspartate Aminotransferase (AST) at Baseline and Change From Baseline at Weeks 24, 48, 96, 144, 192, 240, 288, 336, and 384",
+                        "HIV-1 RNA at Baseline and Change From Baseline at Weeks 24, 48, 96, 144, 192, 240, 288, 336, and 384",
+                        "Percentage of Participants With HIV-1 RNA < 400 Copies/mL at Baseline and at Weeks 24, 48, 96, 144, 192, 240, 288, 336, and 384",
+                        "Percentage of Participants With HIV-1 RNA < 50 Copies/mL at Baseline and at Weeks 24, 48, 96, 144, 192, 240, 288, 336, and 384",
+                        "CD4 Cell Count at Baseline and Change From Baseline at Weeks 24, 48, 96, 144, 192, 240, 288, 336, and 384",
+                        "Incidence of Mortality"
+                    ]
+                },
+                "exploratory_endpoints": {
+                    "title": "Exploratory Endpoints",
+                    "value": "Not Available"
+                }
+            }
+        },
+        "contacts": {
+            "title": "Trial Contacts",
+            "value": [
+                {
+                    "name": {
+                        "title": "Name",
+                        "value": "Martin Rhee, MD"
+                    },
+                    "contact_num": {
+                        "title": "Contact Number",
+                        "value": "Not Available"
+                    },
+                    "email": {
+                        "title": "Email",
+                        "value": "ClinicalTrialDisclosures@Gilead.com"
+                    }
+                }
+            ]
+        },
+        "site_location": {
+            "title": "Trial Site Locations",
+            "value": [
+                {
+                    "country": {
+                        "title": "Country",
+                        "value": "United States"
+                    },
+                    "sites": {
+                        "title": "Sites",
+                        "value": 47
+                    },
+                    "facility": {
+                        "title": "Facility",
+                        "value": [
+                            "Pheonix, Arizona",
+                            "Little Rock, Arkansas",
+                            "Beverly Hills, California",
+                            "Costa Mesa, California",
+                            "Fountain Valley, California",
+                            "Long Beach, California",
+                            "Los Angeles, California",
+                            "Newport Beach, California",
+                            "Palo Alto, California",
+                            "San Diego, California",
+                            "San Francisco, California",
+                            "Norwalk, Connecticut",
+                            "Washington D.C., District of Columbia",
+                            "Atlantis, Florida",
+                            "Fort Lauderdale, Florida",
+                            "Manors, Florida",
+                            "Miami, Florida",
+                            "North Miami Beach, Florida",
+                            "North Palm Beach, Florida",
+                            "Orlando, Florida",
+                            "Sarasota, Florida",
+                            "Tampa, Florida",
+                            "Decatur, Georgia",
+                            "Macon, Georgia",
+                            "Chicago, Illinois",
+                            "Baltimore, Maryland",
+                            "Boston, Massachusetts",
+                            "West Springfield, Massachusetts",
+                            "Saint Louis, Michigan",
+                            "Henderson, Nevada",
+                            "Hillsborough, New Jersey",
+                            "Santa Fe, New Mexico",
+                            "Albany, New York",
+                            "Manhasset, New York",
+                            "New York, New York",
+                            "Stony Brook, New York",
+                            "The Bronx, New York",
+                            "Durham, North Carolina",
+                            "Huntersville, North Carolina",
+                            "Hershey, Pennsylvania",
+                            "Philadelphia, Pennsylvania",
+                            "Memphis, Tennessee",
+                            "Dallas, Texas",
+                            "Houston, Texas",
+                            "Annandale, Virginia",
+                            "Seattle, Washington",
+                            "Tacoma, Washington"
+                        ]
+                    }
+                },
+                {
+                    "country": {
+                        "title": "Country",
+                        "value": "Puerto Rico"
+                    },
+                    "sites": {
+                        "title": "Sites",
+                        "value": 1
+                    },
+                    "facility": {
+                        "title": "Facility",
+                        "value": [
+                            "Santurce"
+                        ]
+                    }
+                }
+            ]
+        }
+    }
+}
