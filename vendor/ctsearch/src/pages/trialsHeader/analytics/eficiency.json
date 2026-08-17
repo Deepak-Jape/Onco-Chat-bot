@@ -1,0 +1,194 @@
+{
+  "filters": {
+    "bakcbone": [
+      "Chemo+Chemo",
+      "Chemo+Targeted",
+      "Unknown",
+      "IO+Chemo",
+      "Targeted+Targeted",
+      "Chemo+Anti-angiogenic",
+      "IO+IO",
+      "CellTherapy+IO",
+      "Chemo+RT",
+      "IO+Targeted",
+      "Targeted+IO",
+      "IO+ADC",
+      "IO+Vaccine",
+      "Not applicable",
+      "IO+RT",
+      "Targeted+Anti-angiogenic",
+      "IO+TKI",
+      "CellTherapy+Chemo",
+      "ADC+IO",
+      "Targeted+RT",
+      "Endocrine+CDK4/6",
+      "IO+CRT",
+      "Targeted+ADC",
+      "RT+Targeted",
+      "Chemo+CRT",
+      "Chemo+TKI",
+      "ADC+Targeted",
+      "Targeted+CRT",
+      "ADC+Chemo",
+      "Targeted+PARP",
+      "Targeted+Endocrine",
+      "Targeted+Chemo",
+      "IO",
+      "Chemo+Vaccine",
+      "Targeted+CDK4/6",
+      "Chemo",
+      "IO+Chemo+RT"
+    ],
+    "line_of_therapy": [
+      "1L",
+      "2L+",
+      "Maintenance",
+      "3L+",
+      "Not Specified",
+      "Neoadjuvant",
+      "Adjuvant"
+    ],
+    "phase": [
+      "Phase III",
+      "Phase IV",
+      "Phase I",
+      "Phase II",
+      "Not Applicable",
+      "Early Phase I"
+    ],
+    "countries": [
+      "Germany ( GER )",
+      "Belgium ( BEL )",
+      "France ( FRA )",
+      "Austria ( AUT )",
+      "United States of America ( USA )",
+      "Unknown",
+      "Canada ( CAN )",
+      "United Kingdom ( UK )",
+      "South Korea ( ROK )",
+      "Russia ( RUS )",
+      "Japan ( JPN )",
+      "Argentina ( ARG )",
+      "Brazil ( BRA )",
+      "Australia ( AUS )",
+      "China ( CHN )",
+      "South Africa ( SA )",
+      "Albania ( ALB )",
+      "India ( IND )",
+      "Bangladesh ( BAN )"
+    ]
+
+  },
+  "efficacyvssafety": {
+
+    
+  "chart": {
+    "x_axis": [
+      { "label": "OTHER", "min": 0.11, "max": 100 },
+      { "label": "SERIOUS", "min": 0.11, "max": 100 },
+      { "label": "Unknown", "min": 0.11, "max": 100 }
+    ],
+    "y_axis": [
+      { "label": "OS", "min": 0.25, "max": 3637274.75 },
+      { "label": "DLT", "min": 0.25, "max": 3637274.75 },
+      { "label": "AE Rate", "min": 0.25, "max": 3637274.75 },
+      { "label": "PFS", "min": 0.25, "max": 3637274.75 },
+      { "label": "MTD", "min": 0.25, "max": 3637274.75 },
+      { "label": "ORR", "min": 0.25, "max": 3637274.75 },
+      { "label": "RP2D", "min": 0.25, "max": 3637274.75 },
+      { "label": "PD Biomarkers", "min": 0.25, "max": 3637274.75 },
+      { "label": "SAE Rate", "min": 0.25, "max": 3637274.75 },
+      { "label": "pCR", "min": 0.25, "max": 3637274.75 },
+      { "label": "EFS", "min": 0.25, "max": 3637274.75 },
+      { "label": "Unknown", "min": 0.25, "max": 3637274.75 },
+      { "label": "TTP", "min": 0.25, "max": 3637274.75 },
+      { "label": "DCR", "min": 0.25, "max": 3637274.75 },
+      { "label": "PR", "min": 0.25, "max": 3637274.75 },
+      { "label": "TTF", "min": 0.25, "max": 3637274.75 },
+      { "label": "CR", "min": 0.25, "max": 3637274.75 },
+      { "label": "IFN-γ", "min": 0.25, "max": 3637274.75 },
+      { "label": "DFS", "min": 0.25, "max": 3637274.75 },
+      { "label": "HRQoL", "min": 0.25, "max": 3637274.75 },
+      { "label": "RFS", "min": 0.25, "max": 3637274.75 },
+      { "label": "PRO-SI", "min": 0.25, "max": 3637274.75 }
+    ],
+    "points": [
+      { 
+        "treatment_id": "NCT00050960",
+        "OS": 8.85,
+        "n": 3060,
+        "OTHER": 14.09,
+        "phase": "Phase III",
+        "backbone": "Chemo+Chemo",
+        "line_of_therapy": "1L"
+      },
+      {
+        "treatment_id": "NCT03626545",
+        "DLT": 54.31,
+        "n": 1225,
+        "OTHER": 8.52,
+        "phase": "Phase III",
+        "backbone": "Chemo+Targeted",
+        "line_of_therapy": "2L+"
+      },
+      {
+        "treatment_id": "NCT03626545",
+        "OS": 54.31,
+        "n": 1225,
+        "SERIOUS": 0.91,
+        "phase": "Phase III",
+        "backbone": "Unknown",
+        "line_of_therapy": "2L+"
+      },
+      {
+        "treatment_id": "NCT01588184",
+        "AE Rate": 41.32,
+        "n": 95,
+        "OTHER": 3.19,
+        "phase": "Phase IV",
+        "backbone": "Unknown",
+        "line_of_therapy": "Maintenance"
+      },  
+      
+      {
+        "treatment_id": "NCT06646276",
+        "Unknown": 0,
+        "n": 2120,
+        "phase": "Phase III",
+        "backbone": "IO+Chemo",
+        "line_of_therapy": "1L"
+      }
+    
+     
+    ]
+  },
+      "metrics": {
+      "x_axis": ["OTHER", "SERIOUS", "Unknown"],
+      "y_axis": [
+        "OS",
+        "DLT",
+        "AE Rate",
+        "PFS",
+        "MTD",
+        "ORR",
+        "RP2D",
+        "PD Biomarkers",
+        "SAE Rate",
+        "pCR",
+        "EFS",
+        "Unknown",
+        "TTP",
+        "DCR",
+        "PR",
+        "TTF",
+        "CR",
+        "IFN-γ",
+        "DFS",
+        "HRQoL",
+        "RFS",
+        "PRO-SI"
+      ]
+    }
+},
+  "summary": 937
+}

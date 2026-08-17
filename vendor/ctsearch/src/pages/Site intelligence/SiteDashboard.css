@@ -1,0 +1,1160 @@
+:root {
+  --sidebar-bg: #13335F;
+  --bg-app: #F3F6FB;
+  --text-main: rgba(0, 0, 0, 0.8);
+  --text-muted: rgba(0, 0, 0, 0.6);
+  --blue-primary: rgba(38, 102, 190, 1);
+  --border-light: rgba(0, 0, 0, 0.05);
+}
+
+.app-container {
+  display: flex;
+  height: 100vh;
+  background: var(--bg-app);
+  font-family: 'Rubik', sans-serif;
+  overflow: hidden;
+  position: relative;
+  /* width: 100vw; */
+}
+
+.content-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;          /* prevents flex child from overflowing */
+  background: var(--bg-app);
+  /* margin-left: 68px; */
+}
+
+/* Figma Header */
+.main-header {
+  height: 68px;
+  background: transparent; /* Based on Figma overlay */
+  padding: 20px 24px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.main-header h1 {
+  font-size: 27px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.btn-create {
+  background: transparent;
+  color: var(--blue-primary);
+  border: 2px solid var(--blue-primary);
+  padding: 0 15px;
+  height: 40px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+
+.btn-create:hover {
+  background: var(--blue-primary);
+  color: white;
+}
+
+/* Section Headings */
+.section-title {
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--text-main);
+  margin: 24px 0 16px;
+  text-align: start;
+  padding: 0 26px;
+}
+
+.dashboard-content {
+  padding: 0 26px 40px;
+  /* overflow-y: auto; */
+}
+
+/* Recent Projects Horizontal Scroll */
+.recent-scroll-area {
+  display: flex;
+  gap: 16px;
+  padding-bottom: 24px;
+}
+
+/* Filters & Tabs */
+.filter-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 24px;
+  /* margin-bottom: 12px; */
+  padding: 0 26px;
+}
+
+.all-projects-header {
+  font-size: 21px;
+  font-weight: 500;
+  color: var(--text-main);
+}
+
+/* .tab-group {
+  display: flex;
+  border: 1px solid #B8D4F9;
+  border-radius: 4px;
+  overflow: hidden;
+  background: white;
+}
+
+.tab {
+  padding: 0 12px;
+  height: 32px;
+  border: none;
+  background: none;
+  font-size: 12px;
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.tab.active, .tab-group :hover {
+  background: var(--blue-primary);
+  color: white;
+} */
+
+.search-wrapper {
+  position: relative;
+  width: 220px;
+}
+
+.search-input {
+  width: 100%;
+  height: 39px;
+  padding: 0 12px 0 34px;
+  border-radius: 6px;
+  border: 1px solid #D9D9E0;
+  font-size: 12px;
+  background: #f3f6fb;
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.main-projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(284px, 1fr));
+  gap: 16px;
+  padding: 0 26px 40px;
+}
+
+
+/* Project Card Specifics */
+/* Project Card Container */
+/* .project-card {
+  width: 284px;
+  height: 129px;
+  padding: 15px;
+  box-sizing: border-box; 
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid #F0F0F3;
+  box-shadow: 1px 8px 34px rgba(153, 169, 190, 0.1);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+} */
+
+/* Header: Title and Icon */
+.card-header {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.card-title {
+  font-family: 'Rubik', sans-serif;
+  font-style: normal;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 18px; /* Matches Figma's 129% height */
+  color: rgba(0, 0, 0, 0.8);
+  margin: 0;
+  text-align: left; /* Fixes your current centered text */
+  flex-grow: 1;
+}
+
+.more-icon {
+  color: rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+/* Body: Cohorts and Status */
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.info-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  height: 22px;
+}
+
+.label {
+  font-size: 14px;
+  font-weight: 400;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+/* .tag-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+} */
+
+.pill-tag {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0px 8px;
+  height: 22px;
+  border: 1px solid #DCE9FC;
+  border-radius: 44px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.more-tag {
+  display: flex;
+  align-items: center;
+  padding: 0px 6px;
+  height: 20px;
+  background: #C7DFFF;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+/* Status Text Colors */
+.status-val {
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.status-val.active {
+  color: #27AE60; /* Figma Green */
+}
+
+.status-val.completed {
+  color: rgba(0, 0, 0, 0.7); /* Figma Muted */
+}
+
+/* Create form css */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-container {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 32px;
+  gap: 20px;
+  width: 860px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.modal-title {
+  font-family: 'Rubik';
+  font-weight: 500;
+  font-size: 16px;
+  color: rgba(0, 0, 0, 0.8);
+  margin: 0;
+}
+
+.close-icon {
+  color: rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+
+/* Synopsis Section */
+.synopsis-container {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 15px;
+  gap: 12px;
+  background: #F0F6FE;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 1px 8px 34px rgba(153, 169, 190, 0.1);
+  border-radius: 4px;
+}
+
+.synopsis-label-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.synopsis-label {
+  /* font-family: 'Inter'; */
+  font-weight: 600;
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.9);
+}
+
+.synopsis-input-row {
+  display: flex;
+  gap: 16px;
+  height: 44px;
+}
+
+.synopsis-input-wrapper {
+  flex-grow: 1;
+}
+
+.synopsis-input {
+  width: 100%;
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  font-size: 14px;
+  box-shadow: 1px 4px 24px rgba(153, 169, 190, 0.2);
+  background: rgba(255, 255, 255, 1) !important;
+}
+
+.btn-upload {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 15px;
+  border: 2px solid #2666BE;
+  background: white;
+  border-radius: 6px;
+  color: #2666BE;
+  font-weight: 500;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn-autofill {
+  padding: 0 15px;
+  background: #DCE9FC;
+  border: 1px solid #B8D4F9;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.8);
+  cursor: pointer;
+}
+
+/* Divider */
+.divider-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+.divider-line {
+  height: 1px;
+  flex-grow: 1;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.divider-text {
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.4);
+}
+
+/* Inputs */
+.manual-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+  /* gap: 12px; */
+}
+
+.text-input {
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  /* box-shadow: 1px 4px 24px rgba(153, 169, 190, 0.2); */
+  box-shadow: 1px 4px 24px 0px #99A9BE33;
+}
+
+.cohort-input-wrapper {
+  display: flex;
+  align-items: center;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 6px;
+  background: white;
+  padding-right: 4px;
+  /* box-shadow: 1px 4px 24px 0px rgba(153, 169, 190, 0.2); */
+  box-shadow: 1px 4px 24px 0px #99A9BE33;
+
+}
+
+.cohort-inner {
+  border: none;
+  box-shadow: none;
+  flex-grow: 1;
+}
+
+.btn-add {
+  height: 34px;
+  width: 57px;
+  background: #DCE9FC;
+  border: 1px solid #B8D4F9;
+  border-radius: 6px;
+  color: rgba(0, 0, 0, 0.8);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* Footer */
+.modal-footer {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.btn-submit {
+  flex-grow: 1;
+  height: 44px;
+  background: #CDCED6; /* Disabled state based on Figma hex */
+  border: none;
+  border-radius: 6px;
+  color: white;
+  /* font-family: 'Inter'; */
+  font-weight: 500;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn-cancel {
+  width: 95px;
+  height: 44px;
+  background: #FFFFFF;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  font-family: 'Rubik';
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.8);
+  cursor: pointer;
+}
+/* Core container updates */
+.project-form-expanded {
+  max-height: 90vh; 
+  width: 860px !important;
+  display: flex;
+  flex-direction: column;
+}
+
+.medical-input {
+  background: rgba(255, 255, 255, 0.5) !important;
+  box-shadow: 1px 4px 24px rgba(153, 169, 190, 0.1) !important;
+}
+
+/* Tag Cloud & Pill Styles */
+.tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.pill-tag-outline {
+  box-sizing: border-box;
+  padding: 3px 12px;
+  border: 1px solid #D9D9E0;
+  border-radius: 4px;
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+}
+
+.pill-tag-outline.selected {
+  background: #DAF1E4;
+  color: #1F8B4D;
+  border: '1px solid #B6E3C9';
+}
+
+.tag-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.pill-tag {
+  padding: 3px 12px;
+  border-radius: 44px;
+  font-size: 14px;
+  border: 1px solid #DCE9FC;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.active-tag {
+  background: #B8D4F9;
+  color: rgba(0, 0, 0, 0.8);
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+/* Button & Footer Overrides */
+.btn-add-primary {
+  height: 34px;
+  width: 57px;
+  background: #2666BE;
+  border-radius: 6px;
+  color: white;
+  border: none;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.active-submit {
+  background: #2666BE !important;
+}
+
+.footer-border-top {
+  border-top: 1px solid rgba(0,0,0,0.05);
+  padding-top: 20px;
+}
+
+
+
+.medical-select-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 44px;
+  padding: 0 40px 0 16px; /* Extra padding on right for the icon */
+  background: rgba(255, 255, 255, 0.5) !important; /* Semi-transparent white as per Figma */
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  /* box-shadow: 1px 4px 24px rgba(153, 169, 190, 0.1) !important; */
+  border-radius: 6px;
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  color: #717182;
+  outline: none;
+}
+
+
+/* Ensure the wrapper handles the positioning perfectly */
+.select-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  box-shadow: 1px 4px 24px 0px #99A9BE1A;
+}
+
+.select-arrow {
+  position: absolute;
+  right: 16px;
+  pointer-events: none;
+  color: rgba(0, 0, 0, 0.4);
+}
+
+/* Grid spacing for Countries row */
+.form-grid-row {
+  display: flex;
+  gap: 16px;
+  width: 796px; /* Exact width from Figma for the internal row */
+  align-self: flex-start;
+}
+
+.medical-section-box {
+  background: #F9F9FB;
+  border: 1px solid #F0F0F3;
+  border-radius: 4px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 796px; /* Matches grid row width */
+  box-sizing: border-box;
+}
+
+/* Fix for the Label color and weight */
+.input-label {
+  font-family: 'Rubik', sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 17px;
+  color: rgba(0, 0, 0, 0.6);
+  margin-bottom: 12px;
+  text-align: left;
+}
+
+.scrollable-form-content {
+  flex: 1;
+  /* overflow-x: hidden prevents the horizontal bar specifically */
+  overflow-y: auto;
+  overflow-x: hidden; 
+  padding: 0 8px 20px 0; 
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  /* Ensure children don't pop out */
+  box-sizing: border-box; 
+  width: 100%;
+}
+
+/* IMPORTANT: Change fixed widths to 100% for all internal containers */
+.medical-section-box,
+.form-grid-row,
+.input-group,
+.cohort-input-wrapper {
+  width: 100% !important; 
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Ensure the grid rows don't wrap and cause overflow */
+.form-grid-row {
+  display: flex;
+  flex-direction: row;
+  gap: 16px;
+  flex-shrink: 0; /* Prevents rows from squishing weirdly */
+}
+
+/* Custom Scrollbar Styling (Webkit) */
+.scrollable-form-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollable-form-content::-webkit-scrollbar-thumb {
+  background: #D9D9D9;
+  border-radius: 10px;
+}
+
+.scrollable-form-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+
+
+
+/* CREATE PROJECT FORM JSX CSS */
+/* Cohort card */
+.cohort-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  /* overflow: hidden; */
+}
+.cohort-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #f8fafc;
+  cursor: pointer;
+  user-select: none;
+}
+.cohort-card-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #1e293b;
+  text-align: left;
+}
+.cohort-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cohort-card-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Chevron animation */
+.chevron-rotate {
+  transition: transform 0.2s ease;
+}
+.chevron-rotate.open {
+  transform: rotate(180deg);
+}
+
+/* Danger icon button */
+.btn-icon-danger {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #ef4444;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+}
+.btn-icon-danger:hover {
+  background: #fee2e2;
+}
+
+/* Error message */
+.form-error-msg {
+  color: #ef4444;
+  font-size: 13px;
+  margin-top: 4px;
+  padding: 3px;
+  background: #fff1f2;
+  border-radius: 6px;
+  border: 1px solid #fecdd3;
+}
+/* ENDOF CREATE PROJECT FORM JSX CSS */
+
+/* ── Country Dropdown ──────────────────────────────────────── */
+.country-dropdown-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.country-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  gap: 8px;
+}
+.country-trigger:hover,
+.country-trigger.open {
+  border-color: #3b5bdb;
+}
+
+.country-trigger-content {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.country-placeholder {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.selected-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.country-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  font-size: 12px;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.country-tag-remove {
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  color: #60a5fa;
+  font-weight: bold;
+}
+.country-tag-remove:hover {
+  color: #1d4ed8;
+}
+
+.country-chevron {
+  flex-shrink: 0;
+  color: #64748b;
+  transition: transform 0.2s ease;
+}
+.country-chevron.rotated {
+  transform: rotate(180deg);
+}
+
+/* Panel */
+.country-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.country-search-wrapper {
+  padding: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.country-search-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+.country-search-input:focus {
+  border-color: #3b5bdb;
+}
+
+.country-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.country-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #334155;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.country-option:hover {
+  background: #f8fafc;
+}
+.country-option.checked {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.country-checkbox {
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  color: transparent;
+}
+.country-checkbox.checked {
+  background: #3b5bdb;
+  border-color: #3b5bdb;
+  color: #fff;
+}
+
+.country-empty {
+  padding: 12px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.country-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid #f1f5f9;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.country-clear-btn {
+  background: none;
+  border: none;
+  color: #ef4444;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+.country-clear-btn:hover {
+  text-decoration: underline;
+}
+
+/* Site Dashboard css */
+.loading-text,
+.empty-text {
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.4);
+  padding: 12px 0;
+}
+
+/* Project Card JSX css */
+.project-card {
+  width: 100%;          /* fills grid cell instead of fixed 284px */
+  min-width: 0;
+  min-height: 129px;
+  height: auto;         /* allows title to wrap without clipping */
+  padding: 15px;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid #F0F0F3;
+  /* box-shadow: 1px 8px 34px rgba(153, 169, 190, 0.1); */
+  box-shadow: 0px 0px 12px rgba(153, 169, 190, 0.1);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.1s ease;
+}
+/* .project-card:hover {
+  transform: scale(1.05);
+  } */
+  
+  .project-card:hover:not(.menu-open) {
+    transform: scale(1.05);
+    box-shadow: rgba(60, 64, 67, 0.3) 0px 1px 2px 0px, rgba(60, 64, 67, 0.15) 0px 2px 6px 2px;
+}
+
+/* .project-card:hover {
+  background: #FFFFFF;
+  transform: scale(1.05);
+  box-shadow: rgba(60, 64, 67, 0.3) 0px 1px 2px 0px, rgba(60, 64, 67, 0.15) 0px 1px 3px 1px;
+} */
+
+
+
+/* .project-card:hover:hover::before {
+  opacity: 1;
+  transform: rotate(-45deg) translateY(100%);
+} */
+
+/* Prevent pill text from wrapping inside the tag */
+.pill-tag {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;     /* truncate very long cohort names */
+}
+
+/* tag-group must not overflow its row */
+.tag-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+/* info-row label stays left, tags stay right, no overflow */
+.info-row {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.label {
+  flex-shrink: 0;   /* label never squishes */
+}
+
+
+/* Cohort header left — stacks title + summary vertically */
+.cohort-card-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Summary pill row shown when collapsed */
+.cohort-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 2px;
+}
+
+.cohort-summary-item {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.5);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.cohort-summary-dot {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.3);
+  line-height: 1;
+}
+
+
+/* ----------------------CSS FOR PROJECT CARD JSX------------------------------------------ */
+.menu-wrapper {
+  position: relative;
+}
+
+.more-icon {
+  cursor: pointer;
+}
+
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+
+.card-menu {
+  position: absolute;
+  top: 24px;
+  right: 0;
+  z-index: 11;
+  background: #fff;
+  border: 1px solid #e0e1e6;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  min-width: 120px;
+  padding: 4px;
+}
+
+.card-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 3px 10px;
+  font-size: 14px;
+  font-family: 'Rubik', sans-serif;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.8);
+}
+
+.card-menu-item:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+.card-menu-item-danger {
+  color: #C0392B;
+}
+
+.card-menu-item-danger:hover {
+  background-color: rgba(192, 57, 43, 0.08);
+}
+
+/* --------------------SITE DASHBOARD DROPDOWN CSS---------------------------------- */
+/* Wrapper */
+.dropdown {
+  position: relative;
+}
+
+/* Trigger Button */
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 180px;
+  padding: 8px 12px;
+  border: 1px solid #d0d7e2;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+/* Backdrop */
+.dropdown-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+}
+
+/* Menu */
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid #d0d7e2;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+  z-index: 1000;
+}
+
+/* Menu Item */
+.dropdown-menu-item {
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.dropdown-menu-item:hover,
+.dropdown-menu-item.selected {
+  background: #f3f7fd;
+}

@@ -1,0 +1,460 @@
+/* ============================================================================
+   SNIPPET SOURCE — mock "source document" rendering for data traceability.
+
+   Reproduces the look of the original CT.gov study page (the screenshots the
+   values were extracted from) inside the traceability popover, so the snippet
+   reads like the source rather than plain text.
+
+   Structure it expects (from a data_traceability entry's `snippet`):
+     .snippet-source
+       .snippet-source-title     <- snippet.heading      (e.g. "Phase")
+       .snippet-source-subtitle  <- snippet.sub_heading  (optional)
+       .snippet-source-value     <- snippet.values[]     (e.g. "Phase 3")
+         mark.snippet-source-mark  <- the `keywords` match inside a value
+
+   Rendered on a WHITE card that sits on top of the popover's yellow highlight
+   band, mirroring the captured screenshots.
+
+   Fonts/colors are taken from the inspected source page:
+     title    14px Roboto, #5C5C5C, margin-bottom 8px, padding-bottom 2px
+     value    16px Roboto, #171716
+   ========================================================================== */
+
+.snippet-source {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+  padding: 12px 16px;
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  /* Keep long source text readable rather than stretching edge to edge. */
+  max-width: 100%;
+  overflow-wrap: break-word;
+}
+
+/* Section label, e.g. "Phase" / "Study Completion (Estimated)".
+   #5C5C5C @ 14px Roboto with the thin rule underneath, as on the source page. */
+.snippet-source-title {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 400;
+  color: #5c5c5c;
+  margin: 0 0 8px 0;
+  padding: 0 0 2px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The ⓘ glossary affordance that follows the title on the source page.
+   Purely decorative here (not interactive), so it must not read as a button. */
+.snippet-source-title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border-radius: 50%;
+  background: #1a3a6b;
+  color: #ffffff;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+/* Optional second-level label between heading and values. */
+.snippet-source-subtitle {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: #5c5c5c;
+  margin: 0 0 6px 0;
+}
+
+/* The extracted value itself — 16px #171716, the darkest text on the page. */
+.snippet-source-value {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 19px;
+  font-weight: 400;
+  color: #171716;
+  margin: 0;
+}
+
+/* Multiple values stack with the same rhythm as the source page. */
+.snippet-source-value + .snippet-source-value {
+  margin-top: 6px;
+}
+
+/* Keyword hit inside a value. Same amber as the popover's existing highlight
+   so the two highlight styles stay consistent. */
+.snippet-source-value mark.snippet-source-mark,
+.snippet-source-mark {
+  background-color: rgba(253, 190, 0, 1);
+  color: #000000;
+  padding: 0 2px;
+  border-radius: 2px;
+  font-weight: 600;
+}
+
+/* ============================================================================
+   ELIGIBILITY CRITERIA VARIANT — .snippet-source--eligibility
+
+   Mirrors the CT.gov "Eligibility Criteria" card, whose typography differs from
+   the plain field snippets above. Measured from the source page:
+     card title    16px Roboto, #1B1B1B, bg #F0F0F0, padding 8px 16px
+     "Description" 14px Roboto, #5C5C5C, margin 0 0 8px, padding 0 0 2px
+     list item     16px Roboto, #1B1B1B, ordered with decimal markers
+     group label   16px Roboto, #1B1B1B, margin 16px 0  ("Inclusion Criteria:")
+   ========================================================================== */
+
+/* The grey title bar sits flush to the card edges, so the card drops its own
+   padding and each inner block supplies its own. */
+.snippet-source--eligibility {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* "Eligibility Criteria" — 16px #1B1B1B on the #F0F0F0 band. */
+.snippet-source--eligibility .snippet-source-card-title {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 25.59px;
+  font-weight: 500;
+  color: #1b1b1b;
+  background: #f0f0f0;
+  padding: 8px 16px;
+  margin: 0;
+}
+
+.snippet-source--eligibility .snippet-source-body {
+  padding: 12px 16px 16px;
+}
+
+/* "Description" — the same muted 14px label as the field snippets, but it
+   spans the body width here rather than hugging the value. */
+.snippet-source--eligibility .snippet-source-title {
+  font-size: 14px;
+  line-height: 22px;
+  color: #5c5c5c;
+  margin: 0 0 8px 0;
+  padding: 0 0 2px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* "Inclusion Criteria:" / "Exclusion Criteria:" — 16px #1B1B1B, 16px vertical
+   rhythm. Not a heading rule, just a labelled break before each list. */
+.snippet-source--eligibility .snippet-source-group {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 25.91px;
+  font-weight: 400;
+  color: #1b1b1b;
+  margin: 16px 0;
+}
+
+/* First group label sits directly under "Description" — no extra top gap. */
+.snippet-source--eligibility .snippet-source-group:first-of-type {
+  margin-top: 0;
+}
+
+/* The numbered criteria list. Markers are the browser's decimal counters, as on
+   the source page (li::marker at 16px), so numbering stays automatic. */
+.snippet-source--eligibility .snippet-source-list {
+  margin: 0;
+  padding-left: 28px;
+  list-style: decimal outside;
+}
+
+.snippet-source--eligibility .snippet-source-list-item {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 25.91px;
+  font-weight: 400;
+  color: #1b1b1b;
+  margin: 0;
+  padding-left: 4px;
+}
+
+/* Wrapped lines align under the text, not under the number. */
+.snippet-source--eligibility .snippet-source-list-item::marker {
+  color: #1b1b1b;
+}
+
+/* ============================================================================
+   OUTCOME MEASURES VARIANT — .snippet-source--outcome
+
+   Mirrors the CT.gov "What is the study measuring?" accordion: a blue section
+   header, a "Primary Outcome Measures ⓘ" label, then a 3-column table
+   (Outcome Measure | Measure Description | Time Frame).
+
+   Measured from the source page:
+     accordion button   22px Roboto, #162E51, bg #EFF6FB,
+                        padding 16px 56px 16px 20px
+     section label      14px Roboto, #5C5C5C, margin 12px 0 0
+     th                 15.84px Roboto, #1B1B1B, padding 15px, bg gray-5 (#F0F0F0)
+     td                 15.84px Roboto, #1B1B1B, padding 15px
+   Column widths follow the source: the description column takes the bulk of the
+   width, with a narrow Time Frame column.
+   ========================================================================== */
+
+.snippet-source--outcome {
+  padding: 0;
+  overflow: hidden;
+  /* Lay out at the source page's width, then scale down to fit the popover so
+     all three columns stay visible. `zoom` (unlike `transform: scale`) also
+     shrinks the element's layout box, so nothing overflows or leaves a gap.
+
+     The popover's content box is ~404px (464 minus its 16px padding, this box's
+     12px padding and the 4px accent border). 660 * 0.6 = 396px, the largest
+     scale that fits while keeping the 15.84px body text near 9.5px. */
+  width: 660px;
+  zoom: 0.6;
+}
+
+/* "What is the study measuring?" — the pale-blue accordion header. Rendered as
+   a plain div (not a button) since there is nothing to expand here. */
+.snippet-source--outcome .snippet-source-accordion {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 22px;
+  line-height: 25.3px;
+  font-weight: 700;
+  color: #162e51;
+  background: #eff6fb;
+  padding: 16px 56px 16px 20px;
+  margin: 0;
+}
+
+.snippet-source--outcome .snippet-source-body {
+  padding: 0 20px 16px;
+}
+
+/* The popover is ~464px wide, far narrower than the CT.gov page this table is
+   copied from. Rather than crush the columns (headers wrap one character per
+   line) or scroll (only one column visible at a time), lay the card out at the
+   source's real width and scale the whole thing down so everything is visible
+   at once, keeping the original proportions.
+
+   840px * 0.5 = 420px, which fits the popover's ~464px content box.
+   `zoom` shrinks the layout box too, so no extra whitespace is left behind. */
+.snippet-source--outcome .snippet-source-table-scroll {
+  margin-top: 12px;
+}
+
+/* "Primary Outcome Measures" + its ⓘ glossary affordance. */
+.snippet-source--outcome .snippet-source-title {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 700;
+  color: #5c5c5c;
+  margin: 12px 0 0 0;
+  padding: 0 0 8px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* The outcome-measures table. `table-layout: fixed` keeps the column ratios
+   stable regardless of how long the description text runs. */
+.snippet-source--outcome .snippet-source-table {
+  /* The card is laid out at a fixed 700px and scaled down, so the table simply
+     fills it — no min-width or horizontal scrolling needed. */
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  border: 1px solid #1b1b1b;
+}
+
+.snippet-source--outcome .snippet-source-table th {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 15.84px;
+  line-height: 24px;
+  font-weight: 700;
+  color: #1b1b1b;
+  background: #f0f0f0;
+  padding: 15px;
+  text-align: left;
+  vertical-align: top;
+  border: 1px solid #1b1b1b;
+}
+
+.snippet-source--outcome .snippet-source-table td {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 15.84px;
+  line-height: 24px;
+  font-weight: 400;
+  color: #1b1b1b;
+  padding: 15px;
+  text-align: left;
+  vertical-align: top;
+  border: 1px solid #1b1b1b;
+  overflow-wrap: break-word;
+}
+
+/* Source column proportions: narrow measure name, wide description, narrow
+   time frame — as on the CT.gov page. */
+.snippet-source--outcome .snippet-source-col-measure { width: 22%; }
+.snippet-source--outcome .snippet-source-col-description { width: 56%; }
+.snippet-source--outcome .snippet-source-col-timeframe { width: 22%; }
+
+/* ============================================================================
+   ADVERSE EVENTS VARIANT — .snippet-source--adverse
+
+   Mirrors the CT.gov "Adverse Events" results table: an "Adverse Events ⓘ"
+   title, a Time Frame row, a blue group banner ("Serious Adverse Events"), a
+   sticky first column of event names, arm columns, and grey System-Organ-Class
+   subgroup rows.
+
+   Measured from the source page:
+     title            16px Roboto, #1B1B1B (bold), with the ⓘ affordance
+     Time Frame row   label cell bg #F0F0F0, value 16px Roboto
+     group banner     14px Roboto #FFFFFF on blue, padding 8px 4px 8px 12px
+     th (arm)         16px Roboto, #1B1B1B, bg #F0F0F0, padding 8px
+     th.sticky-col    14px Roboto, #000, bg #F0F0F0, padding 10px 8px 8px,
+                      text-align right, border-width 0 2px 1px 1px
+     td.sticky-col    same as th.sticky-col (right-aligned event name)
+     td.data-cell     padding 8px; .cell-value 16px Roboto #1B1B1B
+     subgroup row     grey band, #FFF text, padding 8px 4px 8px 12px
+   ========================================================================== */
+
+.snippet-source--adverse {
+  padding: 0;
+  overflow: hidden;
+  /* Same fit-to-popover treatment as the outcome table: lay out at the source
+     width, then scale down so every arm column stays visible. */
+  width: 660px;
+  zoom: 0.6;
+}
+
+/* "Adverse Events" + its ⓘ glossary affordance. */
+.snippet-source--adverse .snippet-source-title {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 700;
+  color: #1b1b1b;
+  margin: 0;
+  padding: 12px 16px 8px;
+  border-bottom: none;
+}
+
+.snippet-source--adverse .snippet-source-body {
+  padding: 0 16px 16px;
+}
+
+/* Time Frame sits in its own two-cell row above the data table. */
+.snippet-source--adverse .snippet-source-timeframe {
+  display: flex;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  margin-bottom: 12px;
+}
+
+.snippet-source--adverse .snippet-source-timeframe-label {
+  flex: 0 0 140px;
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 700;
+  color: #1b1b1b;
+  background: #f0f0f0;
+  padding: 8px;
+  border-right: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.snippet-source--adverse .snippet-source-timeframe-value {
+  flex: 1;
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 400;
+  color: #1b1b1b;
+  padding: 8px;
+}
+
+/* The blue banner naming the event group (e.g. "Serious Adverse Events"). */
+.snippet-source--adverse .snippet-source-group-title {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 17px;
+  font-weight: 700;
+  color: #ffffff;
+  background: #2a5d9f;
+  padding: 8px 4px 8px 12px;
+}
+
+.snippet-source--adverse .snippet-source-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+/* Arm column headers — 16px on the grey header fill. */
+.snippet-source--adverse .snippet-source-table th {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 700;
+  color: #1b1b1b;
+  background: #f0f0f0;
+  padding: 8px;
+  text-align: left;
+  vertical-align: bottom;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+/* The frozen first column: right-aligned 14px labels on the grey fill, with the
+   source's heavier right border separating it from the data columns. */
+.snippet-source--adverse .snippet-source-sticky-col {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 19px;
+  font-weight: 400;
+  color: #000000;
+  background: #f0f0f0;
+  padding: 10px 8px 8px;
+  text-align: right;
+  vertical-align: top;
+  border-width: 0 2px 1px 1px;
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.25);
+  border-right-color: #8ba6c9; /* blue-warm-80v accent on the source page */
+  width: 34%;
+}
+
+/* Data cells: 8px padding, value at 16px. */
+.snippet-source--adverse .snippet-source-table td.snippet-source-data-cell {
+  padding: 8px;
+  vertical-align: top;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.snippet-source--adverse .snippet-source-cell-value {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 19px;
+  font-weight: 400;
+  color: #1b1b1b;
+}
+
+/* System Organ Class band spanning the full table width. */
+.snippet-source--adverse .snippet-source-subgroup td {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 17px;
+  font-weight: 700;
+  color: #ffffff;
+  background: #6b6b6b;
+  padding: 8px 4px 8px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+/* The †1 footnote marker that follows event names on the source page. */
+.snippet-source--adverse .snippet-source-footnote {
+  font-size: 11px;
+  vertical-align: super;
+  color: #000000;
+}

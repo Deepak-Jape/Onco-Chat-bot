@@ -1,0 +1,573 @@
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@font-face {
+  font-family: "Rubik";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("./assets/fonts/rubik/rubik-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Rubik";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("./assets/fonts/rubik/rubik-latin-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Rubik";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url("./assets/fonts/rubik/rubik-latin-600-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Rubik";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url("./assets/fonts/rubik/rubik-latin-700-normal.woff2") format("woff2");
+}
+
+#root {
+  /* max-width: 1280px; */
+  margin: 0 auto;
+  /* padding: 2rem; */
+  text-align: center;
+  font-family: "Rubik";
+}
+
+body {
+  font-family: "Rubik"
+}
+
+* {
+  font-family: 'Rubik' !important;
+}
+
+@media (min-width: 800px) and (max-width: 1125px) {
+  .my-padding {
+    padding-right: 130px;
+  }
+}
+
+
+@media (min-width: 1126px) {
+  .my-padding {
+     padding-right: 130px;
+  white-space: normal;     
+  overflow-wrap: normal;    
+  word-break: normal;  
+  }
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;  
+  scrollbar-width: none;     
+}
+
+/* Inset row dividers (body only) */
+.ct-inset-row-divider {
+  position: relative;
+  border-bottom: none !important;
+  background-image: linear-gradient(
+    to right,
+    transparent 16px,
+    rgba(0, 0, 0, 0.05) 16px,
+    rgba(0, 0, 0, 0.05) calc(100% - 16px),
+    transparent calc(100% - 16px)
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 1px;
+  background-position: 0 100%;
+}
+.ct-inset-row-divider:last-child {
+  background-image: none;
+}
+
+/* Inset divider (used directly under split headers) */
+.ct-inset-divider {
+  height: 1px;
+  background-image: linear-gradient(
+    to right,
+    transparent 16px,
+    rgba(0, 0, 0, 0.05) 16px,
+    rgba(0, 0, 0, 0.05) calc(100% - 16px),
+    transparent calc(100% - 16px)
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 1px;
+  background-position: 0 0;
+}
+
+/* Inset divider drawn on a cell (used for colSpan section header rows) */
+.ct-inset-divider-cell {
+  background-image: linear-gradient(
+    to right,
+    transparent 16px,
+    rgba(0, 0, 0, 0.05) 16px,
+    rgba(0, 0, 0, 0.05) calc(100% - 16px),
+    transparent calc(100% - 16px)
+  ) !important;
+  background-repeat: no-repeat !important;
+  background-size: 100% 1px !important;
+  background-position: 0 100% !important;
+}
+
+/* Population Characteristics: vertical dividers + inset horizontal dividers */
+.ct-population-body-table tbody td {
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+  border-left: 1px solid rgba(0, 0, 0, 0.05) !important;
+  border-right: 1px solid rgba(0, 0, 0, 0.05) !important;
+}
+.ct-population-body-table tbody tr {
+  background-image: linear-gradient(
+    to right,
+    transparent 16px,
+    rgba(0, 0, 0, 0.05) 16px,
+    rgba(0, 0, 0, 0.05) calc(100% - 16px),
+    transparent calc(100% - 16px)
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 1px;
+  background-position: 0 100%;
+}
+.ct-population-body-table tbody tr:last-child {
+  background-image: none;
+}
+
+/* Section header rows in Population table use a single colSpan cell; draw inset divider on the cell */
+.ct-population-body-table tbody tr.ct-pop-section-row td {
+  background-image: linear-gradient(
+    to right,
+    transparent 16px,
+    rgba(0, 0, 0, 0.05) 16px,
+    rgba(0, 0, 0, 0.05) calc(100% - 16px),
+    transparent calc(100% - 16px)
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 1px;
+  background-position: 0 100%;
+}
+
+/* Force Figma border color for all table dividers (vertical + horizontal) */
+.ct-figma-borders,
+.ct-figma-borders th,
+.ct-figma-borders td {
+  border-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Unified table border + dividers (Figma: 1px, rgba(0,0,0,0.05)) */
+.ct-unified-table th,
+.ct-unified-table td {
+  border-color: rgba(0, 0, 0, 0.05) !important;
+}
+/* Avoid double outer border: container provides outside stroke */
+.ct-unified-table thead tr:first-child th {
+  border-top: none !important;
+}
+.ct-unified-table th:first-child,
+.ct-unified-table td:first-child {
+  border-left: none !important;
+}
+.ct-unified-table th:last-child,
+.ct-unified-table td:last-child {
+  border-right: none !important;
+}
+.ct-unified-table tbody tr:last-child td {
+  border-bottom: none !important;
+}
+
+/* Most Common Adverse Effects (scroll body table): center numeric/value cells */
+.ct-scroll-table tbody td:not(:first-child) {
+  text-align: center !important;
+}
+
+/* MCAE first column values (Adverse Event names) */
+.ct-mcae-body-table tbody td:first-child {
+  font-family: Rubik, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+  letter-spacing: 0%;
+  color: rgba(0, 0, 0, 0.8);
+  text-align: left;
+}
+.ct-mcae-body-table tbody td:first-child .tableBody_values,
+.ct-mcae-body-table tbody td:first-child span {
+  color: rgba(0, 0, 0, 0.8) !important;
+}
+
+/* MCAE sub-header typography (All Grade / Grade 3-4) */
+.ct-mcae-header-table thead tr:nth-child(2) th {
+  font-family: Rubik, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+  letter-spacing: 0%;
+  color: rgba(0, 0, 0, 0.8);
+  text-align: center;
+}
+
+/* Population Characteristics: avoid double top border (outer container already has it) */
+.ct-population-header-table thead th {
+  border-top: none !important;
+}
+
+/* Population Characteristics: header bottom divider comes from th borders */
+
+/* Population Characteristics: header divider is full width (no override) */
+
+/* (outer edge borders handled by .ct-unified-table rules) */
+
+@keyframes hoverCard {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+    box-shadow: 0px 0px 5px rgba(85,110,143,0.1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0px 0px 24px 12px rgba(85,110,143,0.2);
+  }
+}
+.stats-grid {
+  display: grid !important;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
+
+/* Mobile + Tablet + iPad + iPad Pro */
+@media (min-width: 600px) and (max-width: 1024px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Center the 3rd card */
+  .stats-grid > div:nth-child(3) {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: center;
+  }
+}
+
+/* Desktop only */
+@media (min-width: 1025px) {
+  .stats-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.scroll-track {
+  position: absolute;
+  bottom: 10px;
+  left: 0;
+  width: 1140px;
+  height: 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  pointer-events: none;
+
+  opacity: 1 !important;    
+  transition: none !important;
+}
+
+
+
+.scroll-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+
+  width: 30vw;               
+  max-width: 88px;           
+
+  height: 6px;
+  border-radius: 6px;
+  background: rgba(38,102,190,1);
+
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+}
+
+@media (min-width: 600px) and (max-width: 1024px) {
+  .scroll-bar {
+    width: 280vw;              
+    max-width: 288px;         
+  }
+}
+
+@media (min-width: 1025px) {
+  .scroll-track {
+    display: none !important;
+    
+  }
+}
+.preview-stack {
+  position: absolute;
+  bottom: 16px;
+  left: 31%; /* 🔒 KEEP as-is for PC & iPad */
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  z-index: 5;
+}
+
+.preview-img {
+  background: #fff;
+  border-radius: 6px;
+  border: 1px solid #DCE9FC;
+  box-shadow: 0px 6px 18px rgba(0, 0, 0, 0.12);
+}
+
+/* RESPONSIVE SIZES USING CLAMP (DESKTOP & TABLET SAFE) */
+.preview-img.big {
+  width: clamp(90px, 18vw, 220px);
+}
+
+.preview-img.medium {
+  width: clamp(70px, 15vw, 180px);
+  margin-top: clamp(8px, 2vw, 14px);
+}
+
+.preview-img.small {
+  width: clamp(50px, 13vw, 160px);
+  margin-top: clamp(14px, 3vw, 26px);
+}
+
+/* ========================= */
+/* ✅ MOBILE-ONLY FIX BELOW */
+/* ========================= */
+@media (max-width: 600px) {
+  .preview-stack {
+    left: 50%;                     /* true centering for narrow screens */
+    transform: translateX(-50%);
+    bottom: 10px;
+    gap: clamp(6px, 2vw, 8px);
+    white-space: nowrap;           /* ✅ prevents wrapping on Z Fold */
+  }
+
+  .preview-img {
+    height: auto;
+    flex-shrink: 0;                /* ✅ prevents image collapse */
+  }
+
+  .preview-img.big {
+    width: min(140px, 40vw);       /* Z Fold safe */
+  }
+
+  .preview-img.medium {
+    width: min(115px, 34vw);
+    margin-top: clamp(4px, 1.5vw, 6px);
+  }
+
+  .preview-img.small {
+    width: min(90px, 28vw);
+    margin-top: clamp(6px, 2vw, 10px);
+  }
+}
+html {
+  scroll-behavior: smooth;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  min-height: 80px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+/* Inner top shadow */
+.inner-shadow-top {
+  box-shadow: inset 0 8px 8px -8px rgba(0, 0, 0, 0.25);
+}
+@keyframes skeleton {
+  0% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.5;
+  }
+}
+/* 
+@keyframes skeleton-rotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+} */
+.scroll-container {
+  overflow-y: auto;
+  scrollbar-width: none;        /* Firefox */
+}
+
+.scroll-container::-webkit-scrollbar {
+  display: none;                /* Chrome / Edge */
+}
+.scroll-container {
+  padding-right: 0;
+  box-sizing: border-box;
+}
+.hide-native-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+@media (min-width: 1025px) {
+  .right-scroll {
+    overflow-x: visible;
+  }
+}
+
+@media (max-width: 1024px) {
+  .right-scroll {
+    overflow-x: auto;
+  }
+}
+  /* Small to medium screens */
+.responsive-divider {
+  left: clamp(200px, 18vw, 420px);
+}
+
+/* Larger screens */
+@media (min-width: 1440px) {
+  .responsive-divider {
+    left: clamp(200px, 23vw, 420px);
+  }
+}
+
+/* ================= Scrollbar Styling ================= */
+
+/* Chrome, Edge, Safari */
+.app-scroll::-webkit-scrollbar {
+  width: 6px;              /* thin */
+}
+
+.app-scroll::-webkit-scrollbar-track {
+  background: transparent; /* no track bg */
+}
+
+.app-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(217, 217, 224, 1);   /* thumb color */
+  border-radius: 10px;
+}
+
+.app-scroll::-webkit-scrollbar-button {
+  display: none;           /* removes top/bottom arrows */
+}
+.app-scroll::-webkit-scrollbar-thumb {
+  border-radius: 10px;
+  background: transparent;              /* IMPORTANT */
+  box-shadow: inset 0 0 0 10px #D9D9D9; /* real color */
+}
+
+/* keep same on hover & active */
+.app-scroll::-webkit-scrollbar-thumb:hover,
+.app-scroll::-webkit-scrollbar-thumb:active {
+  background: transparent;
+  box-shadow: inset 0 0 0 10px #D9D9D9;
+}
+
+/* Firefox */
+.app-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #D9D9D9 transparent;
+}
+
+.app-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.listtab-right-panel {
+  width: 100%;
+  max-width: 100%;
+  margin-left: 0;
+  box-sizing: border-box;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.hide-x-scroll::-webkit-scrollbar:horizontal {
+  height: 0px;
+}
+
+.hide-x-scroll {
+  scrollbar-width: none; /* firefox */
+}
+
+
+/* Hide native scrollbar */
+.custom-scroll {
+  overflow-y: auto;
+  scrollbar-width: none;        /* Firefox */
+}
+
+.custom-scroll::-webkit-scrollbar {
+  width: 0px;                   /* Chrome/Safari */
+  height: 0px;
+}
+
+/* Track */
+.custom-scrollbar-track {
+  position: absolute;
+  width: 4px;
+  border-radius: 30px;
+  background: #E8E8EC;
+}
+
+.custom-scrollbar-thumb {
+  position: absolute;
+  width: 4px;
+  border-radius: 30px;
+  background: #CDCED6;
+}
+
+/* Executive Summary -> Treatments: keep "Experimental/Control" pill text constant on hover */
+.arm-type-pill {
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.arm-type-pill:hover {
+  color: rgba(0, 0, 0, 0.8);
+}
+
+
+
+
+@keyframes shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
