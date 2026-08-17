@@ -1,34 +1,110 @@
 """
 Piece 7 -- eval harness grading engine.
 Two of the three grading layers are fully automated (tool-call accuracy,
-escalation accuracy). The third (answer quality) needs a real LLM judge --
-stubbed here with a clear placeholder, since it requires an actual model call
-this sandbox isn't wired to make.
+escalation accuracy). The third (answer quality) uses a real LLM judge call
+via llm_client, gated on llm_client.available() so this still degrades to a
+clear "not scored" note when no backend/key is configured.
 """
-import sys, os
+import sys, os, json, re
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from router import handle_turn, _sessions
 from eval.seed_cases import SEED_CASES
 
 
-def judge_answer_quality(tool_result, final_answer_text, required_facts, required_citations):
+def judge_answer_quality(tool_result, final_answer_text, required_facts=None, required_citations=None):
     """
-    PLACEHOLDER -- in production this is a Claude call using a FIXED judge model
-    (not the model under test, so grading doesn't drift as the production model
-    changes). Given tool_result as grounding and final_answer_text, the judge
-    checks required_facts/citations are present and flags any claim not
-    supported by tool_result (the hallucination check).
-    Not implemented here: no synthesis/formatting model is wired in this
-    sandbox yet (Doc 05's cheap-format / strong-synthesize step comes after
-    this router layer). Returns a fixed placeholder score.
+    NOTE: ideally this runs on a FIXED judge model separate from the model under
+    test, so grading doesn't drift as the production model changes. Only one
+    backend (config.LLM_BACKEND) is configured in this environment, so the judge
+    call reuses it -- same-model grading is weaker (a model is less likely to
+    catch its own mistakes) but still surfaces clear hallucinations/omissions.
+    Returns {"score": float|None, "grounded": bool|None, "issues": [...], "note": str}.
     """
-    return {"score": None, "note": "not implemented -- requires a real judge-model call"}
+    import llm_client
+    if not final_answer_text:
+        return {"score": None, "grounded": None, "issues": [], "note": "no answer text to judge"}
+    if not llm_client.available():
+        return {"score": None, "grounded": None, "issues": [],
+                 "note": "not scored -- no LLM backend/key configured"}
+
+    facts_block = ("\n".join(f"- {f}" for f in required_facts) if required_facts
+                   else "(none specified -- judge for general grounding/hallucination only)")
+    citations_block = ("\n".join(f"- {c}" for c in required_citations) if required_citations
+                        else "(none specified)")
+    prompt = f"""You are a strict grading judge for a clinical-trials assistant. Given the
+GROUNDING DATA (the only source of truth the assistant was allowed to use) and the
+ASSISTANT'S ANSWER, grade the answer.
+
+GROUNDING DATA (tool result, as JSON):
+{json.dumps(tool_result, default=str)[:100000]}
+
+REQUIRED FACTS the answer should contain:
+{facts_block}
+
+REQUIRED CITATIONS the answer should contain:
+{citations_block}
+
+ASSISTANT'S ANSWER:
+{final_answer_text[:12000]}
+
+Grade strictly. A claim is a HALLUCINATION only if it states something as fact that
+contradicts or is absent from the grounding data AND is not clearly labeled as general
+knowledge. Respond with ONLY a JSON object, no prose, no markdown fences:
+{{"score": <0.0-1.0 float, 1.0 = fully grounded and complete>,
+  "grounded": <true|false>,
+  "missing_required_facts": [<strings>],
+  "hallucinations": [<short strings describing any unsupported claim>]}}"""
+
+    try:
+        raw = llm_client.chat([{"role": "user", "content": prompt}])
+    except llm_client.LLMUnavailable as e:
+        return {"score": None, "grounded": None, "issues": [], "note": f"judge call failed: {e}"}
+
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not match:
+        return {"score": None, "grounded": None, "issues": [],
+                 "note": f"judge returned unparseable output: {raw[:200]}"}
+    try:
+        parsed = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return {"score": None, "grounded": None, "issues": [],
+                 "note": f"judge returned invalid JSON: {match.group(0)[:200]}"}
+
+    issues = list(parsed.get("missing_required_facts") or []) + list(parsed.get("hallucinations") or [])
+    return {"score": parsed.get("score"), "grounded": parsed.get("grounded"),
+            "issues": issues, "note": "scored by live judge call"}
+
+
+def check_required_facts(answer_text, tool_result, required_facts):
+    """Deterministic, case-insensitive substring check -- cheap, exact, zero
+    hallucination-risk of its own (unlike the LLM judge).
+
+    Checks the LLM-narrated answer_text AND the raw tool_result JSON, not just
+    the former: several tools (e.g. get_endpoints_and_outcomes / outcome_deep_dive
+    when it doesn't escalate) skip synthesis.py entirely and are rendered by a
+    DETERMINISTIC HTML function in web_app.py straight from tool_result -- see
+    render_endpoints_and_outcomes(). This harness calls router.handle_turn()
+    directly and never reaches that rendering layer, so checking answer_text
+    alone would falsely report those turns as missing facts that the real user
+    sees just fine. tool_result is the actual source those renderers draw from,
+    so checking it is a faithful (if slightly generous -- it doesn't confirm the
+    HTML renderer wires up every field) proxy for what a user would see.
+
+    Returns (ok: bool|None, missing: list[str]). None means "not applicable"
+    (no required_facts specified for this turn)."""
+    if not required_facts:
+        return None, []
+    text = ((answer_text or "") + "\n" + json.dumps(tool_result, default=str)).lower()
+    missing = [f for f in required_facts if f.lower() not in text]
+    return (len(missing) == 0), missing
 
 
 def run_seed_set():
     tool_correct, tool_total = 0, 0
     escalation_correct, escalation_total = 0, 0
+    facts_correct, facts_total = 0, 0
+    quality_scores = []
     results = []
 
     for case in SEED_CASES:
@@ -56,11 +132,27 @@ def run_seed_set():
             escalation_total += 1
             escalation_correct += int(esc_ok)
 
+            answer_text = (outcome.get("synthesis") or {}).get("text")
+
+            turn_facts = case.get("required_facts")
+            required_facts = turn_facts[i] if turn_facts and i < len(turn_facts) else None
+            facts_ok, missing_facts = check_required_facts(
+                answer_text, outcome.get("tool_result"), required_facts)
+            if facts_ok is not None:
+                facts_total += 1
+                facts_correct += int(facts_ok)
+
+            judged = judge_answer_quality(outcome.get("tool_result"), answer_text, required_facts)
+            if judged.get("score") is not None:
+                quality_scores.append(judged["score"])
+
             case_result["turns"].append({
                 "user": turn["user"],
                 "expected_tool": expected_tool, "actual_tool": actual_tool, "tool_ok": tool_ok,
                 "expected_escalation": expected_esc, "actual_escalation": actual_esc, "esc_ok": esc_ok,
                 "response_mode": outcome.get("response_mode"),
+                "required_facts": required_facts, "facts_ok": facts_ok, "missing_facts": missing_facts,
+                "answer_quality": judged,
             })
 
             if case.get("expect_unmatched_terms"):
@@ -71,13 +163,21 @@ def run_seed_set():
 
     tool_call_accuracy = tool_correct / tool_total if tool_total else 0
     escalation_accuracy = escalation_correct / escalation_total if escalation_total else 0
+    required_facts_accuracy = facts_correct / facts_total if facts_total else None
+    answer_quality = (round(sum(quality_scores) / len(quality_scores), 3)
+                       if quality_scores else None)
 
     return {
         "tool_call_accuracy": round(tool_call_accuracy, 3),
         "escalation_accuracy": round(escalation_accuracy, 3),
+        "required_facts_accuracy": (round(required_facts_accuracy, 3)
+                                     if required_facts_accuracy is not None else "n/a -- no case had required_facts"),
+        "required_facts_n": facts_total,
         "n_cases": len(SEED_CASES),
         "n_turns": tool_total,
-        "answer_quality": "not scored -- judge model not wired in this sandbox",
+        "answer_quality": answer_quality if answer_quality is not None
+                           else "not scored -- no LLM backend/key configured",
+        "answer_quality_n": len(quality_scores),
         "case_results": results,
     }
 

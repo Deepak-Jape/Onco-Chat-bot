@@ -238,6 +238,56 @@ export const REGISTRY = {
     enabled: true,
   },
 
+  // Cross-table relationship panels (complex_insights.py). All four are plain
+  // {columns, data} tables, so they share PanelTable like the other panels.
+  DrugCombinationTable: {
+    component: lazy(() => import("./PanelTable.jsx")),
+    label: "Drug combination network",
+    useWhen: "the question asks which drug combinations recur across trials",
+    requires: ["columns", "data"],
+    enabled: true,
+  },
+
+  BiomarkerOutcomeTable: {
+    component: lazy(() => import("./PanelTable.jsx")),
+    label: "Hazard ratio by biomarker",
+    useWhen: "the question asks how outcomes differ by biomarker status",
+    requires: ["columns", "data"],
+    enabled: true,
+  },
+
+  SponsorMoATable: {
+    component: lazy(() => import("./PanelTable.jsx")),
+    label: "Sponsor mechanism specialization",
+    useWhen: "the question asks which sponsors specialize in which mechanisms",
+    requires: ["columns", "data"],
+    enabled: true,
+  },
+
+  SiteFeasibilityTable: {
+    component: lazy(() => import("./PanelTable.jsx")),
+    label: "Site density vs. disease burden",
+    useWhen: "the question asks which countries are under/over-served by trial sites",
+    requires: ["columns", "data"],
+    enabled: true,
+  },
+
+  PayloadSafetyTable: {
+    component: lazy(() => import("./PanelTable.jsx")),
+    label: "Payload mechanism vs. safety profile",
+    useWhen: "the question asks how ADC payload/mechanism relates to adverse events",
+    requires: ["columns", "data"],
+    enabled: true,
+  },
+
+  RegionFootprintTable: {
+    component: lazy(() => import("./PanelTable.jsx")),
+    label: "Site footprint by region",
+    useWhen: "the question asks about geographic/regional trial-site distribution",
+    requires: ["columns", "data"],
+    enabled: true,
+  },
+
   KMCurve: {
     component: lazy(() => import("@ct/pages/trialsHeader/trials/EfficacyExplorerCard")),
     label: "Kaplan-Meier survival curve",

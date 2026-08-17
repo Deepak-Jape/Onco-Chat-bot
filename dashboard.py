@@ -252,10 +252,21 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
         return f"{text}{unit}" if unit == "%" else f"{text} {unit}"
 
     def _n(planned, enrolled):
+        # trial_info.enrollment_count is NOT a live "how many have enrolled
+        # so far" count -- confirmed against the whole database: it equals
+        # planned_enrollment_count for 100% of Recruiting, Not Yet
+        # Recruiting, and Enrolling-By-Invite trials (ClinicalTrials.gov
+        # reports "Enrollment" as the anticipated target until a trial
+        # concludes, not a running total). Showing it as "(Enrolled)"
+        # whenever it happens to match the target falsely implies the trial
+        # has already hit its enrollment goal. The Executive Summary drawer
+        # (executive_summary.py, a separately-curated payload) already only
+        # shows Planned for exactly this reason -- match that here instead
+        # of showing a second, contradicting figure for the same trial.
         bits = []
         if planned is not None:
             bits.append(f"{planned} (Planned)")
-        if enrolled is not None:
+        if enrolled is not None and enrolled != planned:
             bits.append(f"{enrolled} (Enrolled)")
         return "\n".join(bits) if bits else None
 
@@ -279,6 +290,144 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
             "pfs": _metric(vals.get("PFS"), "mo"),
         })
 
+    # Collapse cohorts that are 100% identical across every DISPLAYED column
+    # -- confirmed live against the DB that this happens for real (e.g. one
+    # trial carrying two cohort_info rows, 1426 and 1427, both named
+    # "EGFR-Mutated Non-Squamous NSCLC" with identical histology/biomarkers/
+    # line_of_therapy/cancer_stage -- an upstream data duplication, not a
+    # join fan-out in this query). Two pixel-identical rows tell the reader
+    # nothing a single row wouldn't, and read as an export bug. This is a
+    # display-layer dedup only: cohort_ids/trial_ids used earlier for AE/
+    # endpoint/outcome aggregates and Key Learnings still reflect the raw
+    # cohort count, since resolving whether 1426/1427 should count as one
+    # cohort everywhere is a separate upstream data-quality question.
+    seen_display_rows = set()
+    deduped_rows, deduped_table_rows = [], []
+    for raw_row, display_row in zip(rows, table_rows):
+        key = tuple(display_row.get(k) for k in
+                    ("oncosuite_id", "phase", "year", "indication", "regimen",
+                     "n", "status", "os", "orr", "pfs"))
+        if key in seen_display_rows:
+            continue
+        seen_display_rows.add(key)
+        deduped_rows.append(raw_row)
+        deduped_table_rows.append(display_row)
+    rows, table_rows = deduped_rows, deduped_table_rows
+
+    # Source traceability for the Excel export -- CSV can't carry comments, so
+    # the cohort table's "why was this cell this value" data (already stored
+    # in oncosuite_gold.data_traceability, the same table citations.py and
+    # tools/get_trial_sources.py read) only reaches the user via an .xlsx
+    # companion download with cell comments attached. Fetched here, in bulk
+    # per field rather than per cell, since this is the one place that already
+    # has every row's oncosuite_id/cohort_id in hand. Only columns with an
+    # unambiguous single source field get a comment -- "regimen" (a
+    # STRING_AGG across possibly several drugs) and "os"/"orr"/"pfs" (a MIN
+    # across an arm's outcome rows, no single arm_id kept per cohort) are
+    # joined/aggregated values with no one data_traceability row that IS the
+    # cell, so they're deliberately left uncommented rather than guessed at.
+    xlsx_base64 = None
+    try:
+        import base64 as _b64
+
+        from excel_export import build_xlsx
+        from traceability import (
+            format_comment, raw_trace_by_oncosuite_id, raw_trace_by_record_id,
+            to_evidence_records,
+        )
+
+        # Raw trace rows fetched ONCE per field set; comments (short hover
+        # summary) and evidence records (full excerpt/reasoning -- see the
+        # "Source Evidence" sheet below) are both derived from the same rows
+        # rather than querying data_traceability twice.
+        trial_trace = raw_trace_by_oncosuite_id(
+            trial_ids, "trial_info",
+            ["trial_phase", "study_status", "planned_enrollment_count",
+             "enrollment_count", "start_date"],
+        )
+        cohort_trace = raw_trace_by_record_id(
+            cohort_ids, "cohort_info", ["histology", "line_of_therapy"],
+        )
+
+        comments = {}
+        evidence = {}
+        for row_i, (oid, _phase, cohort_id, _hist, _line, _regimen,
+                    planned_val, enrolled_val, _status, _yr) in enumerate(rows):
+            phase_rows = trial_trace.get((oid, "trial_phase"))
+            if phase_rows:
+                comments[(row_i, "phase")] = format_comment(phase_rows)
+                evidence[(row_i, "phase")] = to_evidence_records(phase_rows, "Phase")
+
+            year_rows = trial_trace.get((oid, "start_date"))
+            if year_rows:
+                comments[(row_i, "year")] = format_comment(year_rows)
+                evidence[(row_i, "year")] = to_evidence_records(year_rows, "Start Date")
+
+            status_rows = trial_trace.get((oid, "study_status"))
+            if status_rows:
+                comments[(row_i, "status")] = format_comment(status_rows)
+                evidence[(row_i, "status")] = to_evidence_records(status_rows, "Status")
+
+            # "Enrolled" is only shown at all when it differs from "Planned"
+            # (see _n() above -- trial_info.enrollment_count is a copy of
+            # the target for every still-recruiting trial, not a real
+            # count), so its traceability shouldn't be attached here either
+            # -- there's no "(Enrolled)" text left on the cell to explain.
+            show_enrolled = enrolled_val is not None and enrolled_val != planned_val
+            n_fields = [("planned_enrollment_count", "N Target")]
+            if show_enrolled:
+                n_fields.append(("enrollment_count", "N Actual"))
+
+            n_rows = [row for field, _ in n_fields for row in (trial_trace.get((oid, field)) or [])]
+            if n_rows:
+                parts = [format_comment(trial_trace[(oid, field)]) for field, _ in n_fields
+                         if trial_trace.get((oid, field))]
+                comments[(row_i, "n")] = "\n\n".join(parts)
+                evidence[(row_i, "n")] = [
+                    rec for field, label in n_fields
+                    for rec in to_evidence_records(trial_trace.get((oid, field)), label)
+                ]
+
+            hist_rows = cohort_trace.get((cohort_id, "histology"))
+            line_rows = cohort_trace.get((cohort_id, "line_of_therapy"))
+            if hist_rows or line_rows:
+                ind_parts = []
+                if hist_rows:
+                    ind_parts.append("Histology:\n" + format_comment(hist_rows))
+                if line_rows:
+                    ind_parts.append("Line of therapy:\n" + format_comment(line_rows))
+                comments[(row_i, "indication")] = "\n\n".join(ind_parts)
+                evidence[(row_i, "indication")] = (
+                    to_evidence_records(hist_rows, "Histology")
+                    + to_evidence_records(line_rows, "Line of Therapy")
+                )
+
+        xlsx_columns = [
+            {"key": "oncosuite_id", "label": "OncoSuite ID"},
+            {"key": "phase", "label": "Phase"},
+            {"key": "year", "label": "Year"},
+            {"key": "indication", "label": "Indication"},
+            {"key": "regimen", "label": "Regimen"},
+            {"key": "n", "label": "N"},
+            {"key": "status", "label": "Status"},
+            {"key": "os", "label": "OS"},
+            {"key": "orr", "label": "ORR"},
+            {"key": "pfs", "label": "PFS"},
+        ]
+        xlsx_base64 = _b64.b64encode(
+            build_xlsx(xlsx_columns, table_rows, comments, evidence)
+        ).decode("ascii")
+    except Exception:
+        # Excel export is a bonus alongside the existing CSV button, not a
+        # dependency of it -- any failure here (missing openpyxl, a DB hiccup)
+        # should just mean no Download Excel button, never a broken dashboard.
+        xlsx_base64 = None
+
+    cohort_table_props = {"data": table_rows, "title": "Cohorts"}
+    if xlsx_base64:
+        cohort_table_props["xlsxBase64"] = xlsx_base64
+        cohort_table_props["xlsxFilename"] = "cohorts.xlsx"
+
     blocks = [{
         "type": "summary",
         "text": (f"We found {len(rows)} cohorts within {len(trial_ids)} trials"
@@ -289,7 +438,7 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
         # only needs the rows. `title` gives the table its own caption instead
         # of relying entirely on the summary line above it.
         "chart": "CohortTable",
-        "props": {"data": table_rows, "title": "Cohorts"},
+        "props": cohort_table_props,
     }]
 
     if endpoint_rows:
@@ -417,123 +566,90 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
                 ],
             })
 
-    # Key Insights, computed from the rows above rather than written by a model:
-    # every figure here is a count taken from the result set, so the panel costs
-    # nothing and cannot state something the data does not support. Each item is
-    # fact + "so what" -- a bare count ("29 of 75 are Phase 2") doesn't tell the
-    # reader anything actionable on its own; what it implies about where this
-    # pipeline sits (maturity, concentration, where risk shows up) does.
-    insights = []
+    # Status mix is still needed below (the "missing data" note explains OS/ORR
+    # gaps differently depending on how many cohorts are Recruiting vs
+    # Completed) even though the old flat "Key Insights" bullets built from
+    # phases/statuses/regimens here have been replaced by Key Learnings below.
     total = len(table_rows)
-    phases = {}
     statuses = {}
-    regimens = {}
     for r in table_rows:
-        if r["phase"]:
-            phases[r["phase"]] = phases.get(r["phase"], 0) + 1
         if r["status"]:
             statuses[r["status"]] = statuses.get(r["status"], 0) + 1
-        if r["regimen"]:
-            regimens[r["regimen"]] = regimens.get(r["regimen"], 0) + 1
 
-    _PHASE_IMPLICATIONS = (
-        # (substring to match in the phase label, implication) -- checked most
-        # advanced first, so a combined label like "Phase 2/3" reads as the
-        # more advanced of the two rather than the earlier one.
-        ("4", "post-approval monitoring, since these are already-marketed regimens"),
-        ("3", "confirmatory testing, so this pipeline is comparatively mature with "
-              "some assets close to a regulatory-relevant readout"),
-        ("2", "efficacy-exploration testing rather than confirmatory Phase 3, so "
-              "this is an early/mid-stage landscape rather than one nearing "
-              "approval decisions"),
-        ("1", "early safety/dose-finding work, so efficacy signals here are still "
-              "preliminary"),
-    )
+    # Key Learnings: cross-column, hypothesis-generating drug-development
+    # insights (regimen-vs-phase skew, status risk patterns, enrollment
+    # shortfalls, indication crowding, plus the reused cross-table analyses
+    # below) -- see key_learnings.py for the full method and its confidence-
+    # level / correlation-not-causation guardrails. Replaces the old flat
+    # "Key Insights" bullets (single-column descriptive stats), which the
+    # task this replaced explicitly flagged as insufficient on their own.
+    insights = []
+    try:
+        from key_learnings import generate_key_learnings
+        insights = generate_key_learnings(rows, table_rows, trial_ids)
+    except Exception:
+        insights = []
 
-    if phases and total:
-        top = max(phases.items(), key=lambda kv: kv[1])
-        pct = round(100 * top[1] / total)
-        implication = next(
-            (imp for tag, imp in _PHASE_IMPLICATIONS if tag in top[0]),
-            "the stage of development varies across this set",
-        )
-        insights.append(
-            f"{top[0]} is the largest single phase ({top[1]} of {total} cohorts, "
-            f"{pct}%) -- most of this pipeline is in {implication}."
-        )
+    # Payload mechanism vs. safety profile: classifies each drug's free-text
+    # mechanism of action into a payload class (topoisomerase-I inhibitor,
+    # microtubule-disrupting/auristatin-class, DNA-crosslinking, ...) and
+    # cross-references it against arm-level Grade 3-4 rates plus two named
+    # patterns (interstitial lung disease, cytopenias) -- connects the
+    # Endpoints panel's mechanism data with the Adverse Events panel's safety
+    # data, which otherwise sit in unrelated tables.
+    try:
+        from complex_insights import payload_safety_insights
+        payload = payload_safety_insights(trial_ids, limit=8)
+        if payload["table"]:
+            blocks.append({
+                "type": "chart", "chart": "PayloadSafetyTable",
+                "props": {
+                    "title": "Payload mechanism vs. safety profile",
+                    "columns": [
+                        {"key": "payload_class", "label": "Payload class"},
+                        {"key": "arms", "label": "Arms"},
+                        {"key": "avg_grade_3_4_pct", "label": "Avg Grade 3-4 %"},
+                        {"key": "ild_arms", "label": "ILD arms"},
+                        {"key": "cytopenia_arms", "label": "Cytopenia arms"},
+                    ],
+                    "data": payload["table"],
+                },
+            })
+            # Not appended to `insights` -- key_learnings.py already reuses
+            # payload_safety_insights and folds its top signal into the
+            # ranked Key Learnings list above, in the fuller Evidence/Why/
+            # Implication format. Duplicating it here as a bare bullet too
+            # would just repeat the same fact twice in one answer.
+    except Exception:
+        pass
 
-    if statuses and total:
-        def _count(*names):
-            names = {n.lower() for n in names}
-            return sum(v for k, v in statuses.items() if k.lower() in names)
-
-        recruiting_n = _count("recruiting")
-        awaiting_n = _count("active - not recruiting")
-        completed_n = _count("completed")
-
-        if recruiting_n:
-            pct = round(100 * recruiting_n / total)
-            line = (f"{recruiting_n} of {total} cohorts ({pct}%) are still actively "
-                    f"Recruiting")
-            if awaiting_n:
-                line += f", plus {awaiting_n} more done enrolling but not yet reporting"
-            line += (" -- most of this pipeline hasn't had time to generate outcome "
-                     "data yet, which is why OS/ORR/PFS are empty for nearly every "
-                     "row above.")
-            insights.append(line)
-        elif completed_n:
-            pct = round(100 * completed_n / total)
-            insights.append(
-                f"{completed_n} of {total} cohorts ({pct}%) are Completed -- this is "
-                "a comparatively mature set, so any missing efficacy data reflects a "
-                "reporting gap rather than trials still being too early to read out."
-            )
-        else:
-            top_status = max(statuses.items(), key=lambda kv: kv[1])
-            insights.append(
-                f"Most common trial status is {top_status[0]} ({top_status[1]} cohorts)."
-            )
-
-    if regimens and total:
-        n_regimens = len(regimens)
-        top_reg = max(regimens.items(), key=lambda kv: kv[1])
-        if top_reg[1] > 1:
-            share = round(100 * top_reg[1] / total)
-            avg = total / n_regimens
-            insights.append(
-                f"{n_regimens} distinct regimens are spread across just {total} "
-                f"cohorts (~{avg:.1f} each), and even the most-studied one, "
-                f"{top_reg[0]}, accounts for only {top_reg[1]} ({share}%) -- no "
-                "single regimen has pulled ahead yet, so this remains a fragmented, "
-                "still-consolidating field rather than one with a clear front-runner."
-            )
-        else:
-            insights.append(
-                f"{n_regimens} distinct regimens appear across these cohorts, each "
-                "studied in only one -- this field is maximally fragmented, with no "
-                "regimen yet repeated across multiple cohorts."
-            )
-
-    if ae_rows:
-        line = (f"Safety data covers {len(ae_rows)} distinct adverse-event terms "
-                f"across {arm_count} arms.")
-        if ae_groups:
-            top_group = ae_groups[0]
-            top_children = [c["event"] for c in top_group["children"][:3]]
-            mechanism_note = ""
-            if "adc" in modality.lower() or "antibody-drug conjugate" in modality.lower():
-                mechanism_note = (", consistent with the cytotoxic payload most ADCs "
-                                  "carry")
-            line += (
-                f" {top_group['event']} is the most-reported category "
-                f"(e.g. {', '.join(top_children)}){mechanism_note} -- this is where "
-                "tolerability is most likely to differentiate these regimens once "
-                "head-to-head comparisons are possible."
-            )
-        insights.append(line)
+    # Site / region footprint: buckets each trial's facility_info countries
+    # into regions (US/EU/APAC/...) -- the granular geographic breakdown the
+    # per-trial location table doesn't summarize on its own.
+    try:
+        from complex_insights import region_site_breakdown
+        region = region_site_breakdown(trial_ids, limit=8)
+        if region["table"]:
+            blocks.append({
+                "type": "chart", "chart": "RegionFootprintTable",
+                "props": {
+                    "title": "Site footprint by region",
+                    "columns": [
+                        {"key": "region", "label": "Region"},
+                        {"key": "trials", "label": "Trials with sites here"},
+                        {"key": "pct_of_trials", "label": "% of trials"},
+                        {"key": "countries", "label": "Countries"},
+                    ],
+                    "data": region["table"],
+                },
+            })
+            # Shown as its own table only -- see the payload-safety note
+            # above for why this isn't also duplicated into `insights`.
+    except Exception:
+        pass
 
     if insights:
-        blocks.append({"type": "insights", "title": "Key Insights", "items": insights})
+        blocks.append({"type": "insights", "title": "Key Learnings", "items": insights})
 
     # Say plainly which panels could not be built and why. A silently missing
     # chart reads as a bug; an unexplained empty column reads as a wrong number.
@@ -541,11 +657,44 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
     with_orr = sum(1 for r in table_rows if r["orr"] is not None)
     with_os = sum(1 for r in table_rows if r["os"] is not None)
     if not with_orr and not with_os:
-        missing.append(
-            "OS and ORR columns are empty: these trials have endpoint definitions "
-            "but no posted outcome values for this modality -- other trials in the "
-            "database do have OS/ORR values."
-        )
+        # State WHY, not just THAT -- an empty column with no cause reads as a
+        # bug; the actual cause differs by where each cohort sits in its
+        # lifecycle, so pick the explanation the status mix actually supports
+        # rather than one generic line for every case.
+        def _status_count(*names):
+            names = {n.lower() for n in names}
+            return sum(v for k, v in statuses.items() if k.lower() in names)
+
+        recruiting_n = _status_count("recruiting")
+        active_n = _status_count("active - not recruiting")
+        completed_n = _status_count("completed")
+
+        if recruiting_n and recruiting_n >= completed_n:
+            reason = (
+                f"{recruiting_n} of {total} cohorts are still Recruiting, so the "
+                "events needed to compute OS/PFS are still accruing and any interim "
+                "read would be censored -- values won't post until each trial "
+                "reaches its data cutoff."
+            )
+        elif active_n and not completed_n:
+            reason = (
+                f"{active_n} of {total} cohorts have finished enrolling but haven't "
+                "reached their primary completion date -- follow-up is ongoing, so "
+                "outcome values are still pending that data cutoff."
+            )
+        elif completed_n:
+            reason = (
+                f"{completed_n} of {total} cohorts are Completed yet still show no "
+                "OS/ORR values -- this looks like a reporting gap (results pending "
+                "publication or peer review) rather than trials being too early to "
+                "read out."
+            )
+        else:
+            reason = (
+                "these trials have endpoint definitions but no posted outcome "
+                "values for this modality."
+            )
+        missing.append(f"OS and ORR columns are empty: {reason}")
     if not scatter:
         missing.append(
             "Efficacy vs Safety is not shown: it needs an ORR and a safety rate "

@@ -1,0 +1,27 @@
+[Unit]
+Description=OncoSuite clinical-trial assistant (web + JSON API)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+# Dedicated service user (create with: sudo useradd -r -s /usr/sbin/nologin oncosuite)
+User=oncosuite
+Group=oncosuite
+
+# Adjust WorkingDirectory to where you place the app on the VM.
+WorkingDirectory=/opt/oncosuite/app
+EnvironmentFile=/etc/oncosuite/oncosuite.env
+
+# Uses the app's own virtualenv (created during setup).
+ExecStart=/opt/oncosuite/app/venv/bin/python web_app.py
+
+Restart=on-failure
+RestartSec=3
+# Harden a little
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

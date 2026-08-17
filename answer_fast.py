@@ -230,6 +230,27 @@ def detect_dashboard(question: str):
     return None
 
 
+# Questions asking for cross-table patterns rather than a specific trial list --
+# answered with complex_insights.build_relationship_dashboard instead of a
+# single chart, since no single-table query captures a drug-combination
+# network, a biomarker/hazard-ratio comparison, a sponsor concentration index,
+# or a site-vs-epidemiology gap.
+_RELATIONSHIP_CUES = (
+    r"\brelationship", r"\bcorrelat", r"\bpattern", r"\bconnection",
+    r"drug combination", r"combination network", r"\bnetwork\b",
+    r"sponsor.*(mechanism|moa|specializ)", r"\bhazard ratio\b.*biomarker",
+    r"biomarker.*\bhazard ratio\b", r"under[- ]?served", r"feasibility.*(epidemiolog|case burden)",
+    r"complex.*(insight|analysis)", r"\bcross[- ]?trial\b",
+)
+
+
+def detect_relationship_insights(question: str) -> bool:
+    """True for questions asking about cross-table relationships/patterns
+    rather than a specific trial, cohort or country lookup."""
+    q = (question or "").lower()
+    return any(re.search(p, q) for p in _RELATIONSHIP_CUES)
+
+
 def _fmt_count(n):
     return f"{n:,}"
 
@@ -443,6 +464,23 @@ def build_fast_answer(question: str, tool_result: dict, oncosuite_ids: list,
                             "total_s": round(time.time() - t0, 2)},
                 "charts": [b["chart"] for b in dash["blocks"] if b["type"] == "chart"],
                 "meta": dash["meta"],
+                "available": list(enabled_specs()),
+            }
+
+    # Cross-table relationship questions ("drug combination patterns",
+    # "sponsor specialization", "under-served countries by case burden") get a
+    # database-wide relationship report -- these facts don't live in any one
+    # table, so there's no single SQL result to hand to chart selection.
+    if detect_relationship_insights(question):
+        from complex_insights import build_relationship_dashboard
+        rel = build_relationship_dashboard()
+        if rel:
+            return {
+                "blocks": rel["blocks"],
+                "timings": {"select_s": 0.0, "build_s": round(time.time() - t0, 2),
+                            "total_s": round(time.time() - t0, 2)},
+                "charts": [b["chart"] for b in rel["blocks"] if b["type"] == "chart"],
+                "meta": rel["meta"],
                 "available": list(enabled_specs()),
             }
 
@@ -683,6 +721,19 @@ def build_fast_answer(question: str, tool_result: dict, oncosuite_ids: list,
             insights = build_key_insights(question, tool_result)
         except Exception:
             pass
+
+        # One extra cross-table relationship bullet (drug-combination
+        # network), scoped to just the trials this answer matched -- capped
+        # so a broad, low-selectivity search doesn't turn an otherwise-instant
+        # per-answer bullet into a full-database scan.
+        if oncosuite_ids and len(oncosuite_ids) <= 300:
+            try:
+                from complex_insights import drug_combination_insights
+                combo = drug_combination_insights(oncosuite_ids, limit=1)
+                if combo["bullets"]:
+                    insights = list(insights) + combo["bullets"][:1]
+            except Exception:
+                pass
 
         if intro:
             blocks.append({"type": "intro", "text": intro})

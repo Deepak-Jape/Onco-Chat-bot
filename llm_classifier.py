@@ -83,9 +83,16 @@ def _system_prompt():
         "'late stage' -> ['Phase 3'].)\n"
         f"- study_status must map to one of: {statuses}. ('open'/'enrolling' -> "
         "'Recruiting'.)\n"
-        "- Any question asking for counts, averages, medians, rankings, 'how many', "
-        "'most/least', breakdowns/group-by, percentages, correlations, or comparisons "
-        "ACROSS many trials (not within one trial's arms) => intent 'aggregate_query'.\n"
+        "- Averages, medians, rankings, breakdowns/group-by, percentages, correlations, "
+        "or comparisons ACROSS many trials (not within one trial's arms) => intent "
+        "'aggregate_query'.\n"
+        "- A bare count ('how many X trials...', 'number of X trials...') where X names "
+        "concrete filters (a condition, biomarker, phase, or status) => intent "
+        "'filtered_search' with those filters extracted, NOT 'aggregate_query' -- the "
+        "search tool's own match count already answers it, and returns the matching "
+        "trials too. Only use 'aggregate_query' for a bare count with nothing concrete "
+        "to scope it by (e.g. 'how many trials do we have in total'), or one that also "
+        "asks for grouping/stats ('how many trials per sponsor').\n"
         "- 'compare the arms' / 'arm A vs arm B' within a trial => 'arm_comparison'.\n"
         "- A specific trial's eligibility/endpoints/safety/etc (named or 'this') => "
         "'single_trial_lookup' (or 'outcome_deep_dive' if specifically about "
@@ -111,6 +118,21 @@ _ALLOWED_FILTER_KEYS = {
     "condition", "biomarkers", "cancer_stage", "line_of_therapy", "phase",
     "study_status", "sponsor", "drug_name_or_target",
 }
+
+# Genuine cross-trial grouping/statistics/comparison -- these need real SQL, unlike
+# a bare count of trials matching concrete filters (search_trials's total_matches
+# already answers that). Mirrors router.py's keyword-fallback classifier so both
+# paths agree on what actually needs text-to-SQL. See classify()'s aggregate_query
+# downgrade below.
+_TRUE_AGG_WORDS = (
+    "average", "avg", "mean", "median", "sum",
+    "most", "least", "fewest", "highest", "lowest", "top ", "rank",
+    "broken down", "break down", "breakdown", "grouped by", "group by", "per ",
+    "distribution", "percentage", "proportion",
+    "ratio", "more often", "less often", "compare", "comparison", "relationship",
+    "correlat", "fraction of", "similar to", "vs ", "versus", "than ",
+    "each ", "across all", "trend",
+)
 
 
 def classify(question, working_set):
@@ -145,8 +167,6 @@ def classify(question, working_set):
         return {"intent": intent, "filters": {},
                 "resolved_oncosuite_id": resolved_oncosuite_id}
 
-    if intent == "aggregate_query":
-        return {"intent": "aggregate_query", "filters": {}}
     if intent == "out_of_scope":
         return {"intent": "out_of_scope", "filters": {}}
     # clean the filters the model returned (done BEFORE the arm_comparison branch
@@ -159,6 +179,18 @@ def classify(question, working_set):
         if k not in _ALLOWED_FILTER_KEYS or not val:
             continue
         filters[k] = val if isinstance(val, list) else [val]
+
+    if intent == "aggregate_query":
+        # Defense in depth against the prompt instruction above not being followed:
+        # a bare count with real filters and no genuine grouping/statistics word is
+        # exactly what search_trials's own total_matches answers (and, unlike a raw
+        # SQL COUNT(*), it returns the matching trials too) -- downgrade rather than
+        # lose the trial list to a bare number.
+        q = (question or "").lower()
+        if filters and not any(w in q for w in _TRUE_AGG_WORDS):
+            return {"intent": "filtered_search", "filters": filters,
+                    "resolved_oncosuite_id": resolved_oncosuite_id}
+        return {"intent": "aggregate_query", "filters": {}}
 
     if intent == "arm_comparison":
         return {"intent": "arm_comparison", "filters": filters,

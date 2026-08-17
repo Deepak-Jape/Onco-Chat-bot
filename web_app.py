@@ -1257,6 +1257,91 @@ def render_cohort_list(syn: dict) -> str:
                                   ("nct_id", "indication", "regimen", "phase", "status")))
     csv_b64 = base64.b64encode("\n".join(csv_lines).encode("utf-8")).decode("ascii")
 
+    # Excel companion for the same rows, with source-traceability comments on
+    # Phase/Status/Indication -- CSV can't carry comments (requirement this is
+    # answering), and this legacy page has no other export path. Reuses
+    # oncosuite_gold.data_traceability directly via traceability.py, same as
+    # the React CohortTable's Excel export in dashboard.py. Skipped entirely
+    # (not a hard failure) if openpyxl is missing or the DB lookup errors --
+    # the CSV button above must keep working regardless.
+    xlsx_b64 = None
+    try:
+        from excel_export import build_xlsx
+        from traceability import (
+            format_comment, raw_trace_by_oncosuite_id, raw_trace_by_record_id,
+            to_evidence_records,
+        )
+
+        oncosuite_ids = [r.get("oncosuite_id") for r in rows if r.get("oncosuite_id")]
+        cohort_ids = [r.get("cohort_id") for r in rows if r.get("cohort_id")]
+
+        # search_cohorts.py: phase comes from cohort_info.phase (not
+        # trial_info.trial_phase), status from trial_info.study_status,
+        # indication is composed from cohort_info's line_of_therapy /
+        # biomarkers / histology / organ -- match that exact field mapping so
+        # a comment never gets attached to the wrong source.
+        trial_trace = raw_trace_by_oncosuite_id(oncosuite_ids, "trial_info", ["study_status"])
+        cohort_trace = raw_trace_by_record_id(
+            cohort_ids, "cohort_info",
+            ["phase", "line_of_therapy", "biomarkers", "histology", "organ"],
+        )
+
+        xlsx_columns = [
+            {"key": "id", "label": "OncoSuite / NCT ID"},
+            {"key": "indication", "label": "Indication"},
+            {"key": "regimen", "label": "Regimen"},
+            {"key": "phase", "label": "Phase"},
+            {"key": "status", "label": "Status"},
+        ]
+        xlsx_rows = []
+        comments = {}
+        evidence = {}
+        for row_i, r in enumerate(rows):
+            xlsx_rows.append({
+                "id": r.get("nct_id") or r.get("oncosuite_id") or "",
+                "indication": r.get("indication"),
+                "regimen": r.get("regimen"),
+                "phase": r.get("phase"),
+                "status": r.get("status"),
+            })
+            cid, oid = r.get("cohort_id"), r.get("oncosuite_id")
+
+            phase_rows = cohort_trace.get((cid, "phase"))
+            if phase_rows:
+                comments[(row_i, "phase")] = format_comment(phase_rows)
+                evidence[(row_i, "phase")] = to_evidence_records(phase_rows, "Phase")
+
+            status_rows = trial_trace.get((oid, "study_status"))
+            if status_rows:
+                comments[(row_i, "status")] = format_comment(status_rows)
+                evidence[(row_i, "status")] = to_evidence_records(status_rows, "Status")
+
+            ind_parts, ind_evidence = [], []
+            for field, heading in (("line_of_therapy", "Line of therapy"),
+                                    ("biomarkers", "Biomarkers"),
+                                    ("histology", "Histology"),
+                                    ("organ", "Organ")):
+                field_rows = cohort_trace.get((cid, field))
+                if field_rows:
+                    ind_parts.append(f"{heading}:\n{format_comment(field_rows)}")
+                    ind_evidence.extend(to_evidence_records(field_rows, heading))
+            if ind_parts:
+                comments[(row_i, "indication")] = "\n\n".join(ind_parts)
+                evidence[(row_i, "indication")] = ind_evidence
+
+        xlsx_b64 = base64.b64encode(
+            build_xlsx(xlsx_columns, xlsx_rows, comments, evidence)
+        ).decode("ascii")
+    except Exception:
+        xlsx_b64 = None
+
+    xlsx_button = ""
+    if xlsx_b64:
+        xlsx_button = (
+            f'<button class="dl-btn dl-btn-xlsx" data-xlsx="{xlsx_b64}" '
+            f'data-name="cohorts.xlsx">⤓ Download Excel (with source notes)</button>'
+        )
+
     insights = ""
     if syn.get("insights"):
         items = "".join(f"<li>{render_markdown_lite(i).replace('<p>','').replace('</p>','')}</li>"
@@ -1274,6 +1359,7 @@ def render_cohort_list(syn: dict) -> str:
         f'<div class="cohort-lead">{lead}</div>'
         '<div class="cohort-toolbar">'
         f'<button class="dl-btn" data-csv="{csv_b64}" data-name="cohorts.csv">⤓ Download CSV</button>'
+        f'{xlsx_button}'
         '<span class="cohort-hint">Click any row for that trial\'s executive summary</span>'
         '</div>'
         '<div class="table-wrap cohort-wrap"><table class="data-table cohort-table"><thead><tr>'
@@ -2124,6 +2210,22 @@ document.getElementById('threadInner').addEventListener('click', function (e) {
     document.body.appendChild(a); a.click(); a.remove();
     return;
   }
+  // Separate button/attribute from the CSV one above -- .xlsx is binary, so it
+  // needs a byte array Blob (not a text Blob like the CSV branch), and this
+  // must never touch the existing CSV path.
+  const dlx = e.target.closest('.dl-btn-xlsx');
+  if (dlx) {
+    const binary = atob(dlx.getAttribute('data-xlsx'));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type:
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = dlx.getAttribute('data-name') || 'cohorts.xlsx';
+    document.body.appendChild(a); a.click(); a.remove();
+    return;
+  }
   const ns = e.target.closest('.nextstep');
   if (ns) { if (!busy) ask(ns.getAttribute('data-q')); return; }
   const row = e.target.closest('.cohort-row');
@@ -2262,13 +2364,34 @@ class Handler(BaseHTTPRequestHandler):
 
             def worker():
                 try:
-                    from answer_fast import build_fast_answer, detect_analytics
+                    from answer_fast import (build_fast_answer, detect_analytics,
+                                             detect_map_chart, detect_case_stage_breakdown)
 
                     # Analytics questions bypass the router entirely: it marks
                     # them out of scope or routes to a tool with no rows, and
                     # the answer comes from the analytics schema regardless.
                     if detect_analytics(q):
                         steps.put(("step", "Reading the analytics dataset"))
+                        result["payload"] = build_fast_answer(q, {}, [])
+                        return
+
+                    # Self-contained geography/epidemiology questions ("show
+                    # cancer cases with stages in US") are answered entirely
+                    # from oncosuite_gold's map/case tables -- no LLM
+                    # classification needed. Bypassing the router matters here:
+                    # its classifier has no "geography" intent category, so it
+                    # reasonably calls this out_of_scope, then burns 2+ minutes
+                    # on text-to-SQL and vector-search fallback attempts before
+                    # ever reaching this same deterministic map logic -- a real
+                    # hang observed on exactly this question. A bare pronoun
+                    # follow-up ("show it on the map") still needs the
+                    # router's session-aware same-search-recap, so this is
+                    # skipped when the question refers back rather than
+                    # standing alone.
+                    _FOLLOWUP_CUES = (r"\bit\b", r"\bsame\b", r"\bagain\b")
+                    map_q = detect_case_stage_breakdown(q) or detect_map_chart(q)
+                    if map_q and not any(re.search(c, q.lower()) for c in _FOLLOWUP_CUES):
+                        steps.put(("step", "Building the map"))
                         result["payload"] = build_fast_answer(q, {}, [])
                         return
 

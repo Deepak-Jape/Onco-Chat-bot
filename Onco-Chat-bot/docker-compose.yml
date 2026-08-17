@@ -1,0 +1,28 @@
+# OncoSuite container for the shared VM.
+# Runs the app on :8014 (host), behind the VM's existing nginx at /chat-bot.
+# HRMS on :8000 is untouched.
+services:
+  oncosuite:
+    # Pull the prebuilt image from Docker Hub (replace with your repo:tag).
+    # For a local build instead, uncomment `build: .`.
+    image: deepak0105/oncosuite:latest
+    # build: .
+    container_name: oncosuite
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # host:container -- expose 8014 on the VM's localhost only; nginx proxies to it.
+      - "127.0.0.1:8014:8014"
+    # Let the container reach services (Postgres, Ollama) running on the VM host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Hand-placed CSV for the RAG index build (kept out of the image / secrets-free).
+      # Put oncosuite_lung_cancer.csv in ./data on the VM.
+      - ./data:/data:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8014/chat-bot/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

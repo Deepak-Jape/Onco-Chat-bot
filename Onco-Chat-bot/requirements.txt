@@ -1,0 +1,6 @@
+# OncoSuite runtime dependencies.
+# The app imports only these two directly; langgraph pulls in langchain-core,
+# pydantic, httpx, orjson, tenacity, etc. transitively (pinned by langgraph itself).
+# Embeddings use a local Ollama HTTP call (stdlib urllib) -- no python client needed.
+psycopg2-binary==2.9.12
+langgraph==1.2.9
