@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { C, CARD, FONT } from "./tokens";
+import arrowIcon from "../assets/arrow.svg";
 
 /* Adverse Events panel.
 
@@ -8,23 +9,57 @@ import { C, CARD, FONT } from "./tokens";
    the mock; the rate columns show an em dash where the database has no value
    rather than a fabricated percentage. */
 
+// Shared arrow.svg (9x5, pre-filled Black/60) rather than a text glyph, so
+// every disclosure/filter arrow in the app is the same mark. Centred in a 12px
+// box to keep the row's original indentation.
 function Chevron({ open }) {
   return (
     <span
       style={{
-        display: "inline-block", width: 12, fontSize: 10, color: C.muted,
-        transform: open ? "rotate(180deg)" : "none", transition: "transform .12s",
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: 12, flexShrink: 0,
       }}
     >
-      ▾
+      <img
+        src={arrowIcon}
+        alt=""
+        aria-hidden="true"
+        width={9}
+        height={5}
+        style={{
+          transform: open ? "rotate(180deg)" : "none", transition: "transform .12s",
+        }}
+      />
     </span>
   );
 }
 
-const cellNum = { width: 110, flexShrink: 0, font: `400 14px/18px ${FONT}` };
+// textAlign here so the AE/SAE numbers line up under their own headers -- the
+// same object styles both, so they can't drift apart.
+const cellNum = {
+  width: 110, flexShrink: 0, font: `400 14px/18px ${FONT}`, textAlign: "left",
+};
 
 export default function AdverseEventsTable({ title = "Adverse Events", badge, groups = [] }) {
   const [open, setOpen] = useState(() => new Set());
+
+  /* The header row lives outside the scrolling body, so the body's scrollbar
+     narrows the rows without narrowing the header -- the AE/SAE values end up
+     left of their own headers. Scrollbar width varies by platform (0 on
+     overlay-scrollbar systems like macOS, ~15-17px on Windows), so measure the
+     real value rather than hardcoding one, and pad the header to match. */
+  const bodyRef = useRef(null);
+  const [scrollbarWidth, setScrollbarWidth] = useState(0);
+
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const measure = () => setScrollbarWidth(el.offsetWidth - el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const toggle = (key) =>
     setOpen((prev) => {
@@ -58,10 +93,18 @@ export default function AdverseEventsTable({ title = "Adverse Events", badge, gr
         ) : null}
       </div>
 
+      {/* This header sits OUTSIDE the scrolling body below, so the body's
+          scrollbar narrows the rows but not this row -- which is what pushed
+          every AE/SAE value left of its header. `scrollbarGutter: stable` on
+          the body (see below) reserves that width permanently; this row pads by
+          the same amount so the two stay in step. */}
       <div
         style={{
           display: "flex", alignItems: "center", gap: 8, minHeight: 43,
-          padding: "0 15px", background: C.headerBg,
+          // Right padding = 15px + the measured scrollbar width, so the AE/SAE
+          // headers sit exactly above their values.
+          padding: "0 15px", paddingRight: 15 + scrollbarWidth,
+          background: C.headerBg,
           borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`,
           font: `500 14px/20px ${FONT}`, color: C.headText,
         }}
@@ -71,7 +114,15 @@ export default function AdverseEventsTable({ title = "Adverse Events", badge, gr
         <div style={cellNum}>SAE</div>
       </div>
 
-      <div style={{ overflowY: "auto", maxHeight: 320 }}>
+      {/* `overflowY: scroll` + `scrollbarGutter: stable` keeps the scrollbar's
+          width reserved at all times. The header row above sits outside this
+          container, so a scrollbar that appears and disappears would shift these
+          rows left relative to the header -- which is exactly what made the
+          AE/SAE values look misaligned with their headers. */}
+      <div
+        ref={bodyRef}
+        style={{ overflowY: "scroll", scrollbarGutter: "stable", maxHeight: 320 }}
+      >
         {groups.map((g, i) => {
           const hasChildren = (g.children || []).length > 1;
           const isOpen = open.has(g.event);

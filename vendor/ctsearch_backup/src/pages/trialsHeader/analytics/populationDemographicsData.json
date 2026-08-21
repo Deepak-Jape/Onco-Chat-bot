@@ -1,0 +1,289 @@
+{
+  "trialedPatientVolume": {
+    "trialsCount": 139,
+    "annual": [
+      { "year": 2020, "observed": 600, "planned": 300 },
+      { "year": 2021, "observed": 800, "planned": 600 },
+      { "year": 2022, "observed": 1200, "planned": 800 },
+      { "year": 2023, "observed": 1600, "planned": 700 },
+      { "year": 2024, "observed": 1700, "planned": 1100 },
+      { "year": 2025, "observed": 1900, "planned": 1400 },
+      { "year": 2026, "observed": 2200, "planned": 1000 }
+    ],
+    "quarterly": [
+      { "period": "Q1 2026", "observed": 520, "planned": 260 },
+      { "period": "Q2 2026", "observed": 540, "planned": 280 },
+      { "period": "Q3 2026", "observed": 560, "planned": 230 },
+      { "period": "Q4 2026", "observed": 580, "planned": 230 }
+    ]
+  },
+
+  "trialsCount": 117,
+
+  "age": {
+    "observed": [
+      { "label": "18–29", "value": 120 },
+      { "label": "30–39", "value": 180 },
+      { "label": "40–49", "value": 280 },
+      { "label": "50–59", "value": 480 },
+      { "label": "60–69", "value": 220 },
+      { "label": "70+", "value": 150 }
+    ],
+    "planned": [
+      { "label": "18–29", "value": 100 },
+      { "label": "30–39", "value": 160 },
+      { "label": "40–49", "value": 250 },
+      { "label": "50–59", "value": 430 },
+      { "label": "60–69", "value": 200 },
+      { "label": "70+", "value": 130 }
+    ],
+    "trials": [
+      {
+        "id": 123,
+        "name": "Pembrolizumab in KRAS G12C-Mutated NSCLC",
+        "n": 1240,
+        "ageRange": "18–70+",
+        "ageDistribution": [4, 6, 10, 14, 12, 10, 8, 6, 4]
+      },
+      {
+        "id": 124,
+        "name": "Nivolumab plus Ipilimumab for Melanoma",
+        "n": 900,
+        "ageRange": "18–70+"
+      },
+      {
+        "id": 125,
+        "name": "Atezolizumab in Triple-Negative Breast Cancer",
+        "n": 845,
+        "ageRange": "18–70+"
+      }
+    ]
+  },
+
+  "gender": {
+    "observed": [
+      { "label": "Female", "value": 78 },
+      { "label": "Male", "value": 22 }
+    ],
+    "planned": [
+      { "label": "Female", "value": 75 },
+      { "label": "Male", "value": 25 }
+    ],
+    "trials": [
+      {
+        "id": 201,
+        "name": "Trastuzumab in HER2-Positive Breast Cancer",
+        "n": 400,
+        "ageRange": "18–70+"
+      }
+    ]
+  },
+
+  "countries": {
+    "observed": [
+      { "label": "United States", "value": 900 },
+      { "label": "United Kingdom", "value": 700 },
+      { "label": "Japan", "value": 420 },
+      { "label": "Germany", "value": 300 },
+      { "label": "China", "value": 260 },
+      { "label": "Canada", "value": 220 }
+    ],
+    "planned": [
+      { "label": "United States", "value": 850 },
+      { "label": "United Kingdom", "value": 680 },
+      { "label": "Japan", "value": 400 },
+      { "label": "Germany", "value": 280 },
+      { "label": "China", "value": 240 },
+      { "label": "Canada", "value": 200 }
+    ],
+    "trials": [
+      {
+        "id": 301,
+        "name": "Durvalumab for NSCLC",
+        "n": 450,
+        "ageRange": "18–70+"
+      },
+      {
+        "id": 302,
+        "name": "Rituximab in Non-Hodgkin Lymphoma",
+        "n": 300,
+        "ageRange": "18–70+"
+      }
+    ]
+  },
+
+  "ethnicity": {
+    "observed": [
+      { "label": "White", "value": 820 },
+      { "label": "African American", "value": 610 },
+      { "label": "Asian", "value": 420 },
+      { "label": "Hispanic / Latino", "value": 310 },
+      { "label": "Other / Mixed", "value": 260 },
+      { "label": "Not specified", "value": 200 }
+    ],
+    "planned": [
+      { "label": "White", "value": 780 },
+      { "label": "African American", "value": 580 },
+      { "label": "Asian", "value": 400 },
+      { "label": "Hispanic / Latino", "value": 290 },
+      { "label": "Other / Mixed", "value": 240 },
+      { "label": "Not specified", "value": 180 }
+    ],
+    "trials": [
+      {
+        "id": 401,
+        "name": "Olaparib in BRCA-Mutated Ovarian Cancer",
+        "n": 280,
+        "ageRange": "18–70+"
+      }
+    ]
+  },
+
+  "lineOfTherapy": {
+    "observed": [
+      { "label": "1L", "value": 90 },
+      { "label": "2L", "value": 70 },
+      { "label": "3L+", "value": 50 },
+      { "label": "Adjuvant", "value": 40 },
+      { "label": "Neo-adjuvant", "value": 30 }
+    ],
+    "planned": [
+      { "label": "1L", "value": 85 },
+      { "label": "2L", "value": 65 },
+      { "label": "3L+", "value": 45 },
+      { "label": "Adjuvant", "value": 35 },
+      { "label": "Neo-adjuvant", "value": 25 }
+    ],
+    "trials": [
+      {
+        "id": 501,
+        "name": "Vemurafenib in BRAF-Mutated Melanoma",
+        "n": 250,
+        "ageRange": "18–70+"
+      }
+    ]
+  },
+
+  "eligibility": {
+    "cancerStage": {
+      "observed": [
+        { "label": "Localized", "value": 120 },
+        { "label": "Locally Advanced", "value": 70 },
+        { "label": "Metastatic", "value": 60 },
+        { "label": "Refractory", "value": 45 },
+        { "label": "Locweealized", "value": 80 },
+        { "label": "Locallyerer Advanced", "value": 70 },
+        { "label": "Metastaeretic", "value": 60 },
+        { "label": "Refraceretory", "value": 45 }
+      ],
+      "planned": [
+        { "label": "Localized", "value": 75 },
+        { "label": "Locally Advanced", "value": 65 },
+        { "label": "Metastatic", "value": 55 },
+        { "label": "Refractory", "value": 40 }
+      ],
+      "trials": [
+        {
+          "id": 601,
+          "name": "Pembrolizumab in Advanced Solid Tumors",
+          "n": 500,
+          "ageRange": "18–70+"
+        }
+      ]
+    },
+
+    "biomarkers": {
+      "observed": [
+        { "label": "HER2", "value": 75 },
+        { "label": "EGFR", "value": 60 },
+        { "label": "KRAS", "value": 50 },
+        { "label": "BRAF", "value": 40 },
+        { "label": "PD-L1", "value": 30 }
+      ],
+      "planned": [
+        { "label": "HER2", "value": 70 },
+        { "label": "EGFR", "value": 55 },
+        { "label": "KRAS", "value": 45 },
+        { "label": "BRAF", "value": 35 },
+        { "label": "PD-L1", "value": 25 }
+      ],
+      "trials": [
+        {
+          "id": 701,
+          "name": "EGFR Inhibitor Study in Lung Cancer",
+          "n": 380,
+          "ageRange": "18–70+"
+        }
+      ]
+    },
+
+    "coMorbidity": {
+      "observed": [
+        { "label": "Cardiac history", "value": 85 },
+        { "label": "Diabetes", "value": 65 },
+        { "label": "Renal impairment", "value": 45 },
+        { "label": "Pulmonary disease", "value": 30 }
+      ],
+      "planned": [
+        { "label": "Cardiac history", "value": 80 },
+        { "label": "Diabetes", "value": 60 },
+        { "label": "Renal impairment", "value": 40 },
+        { "label": "Pulmonary disease", "value": 25 }
+      ],
+      "trials": [
+        {
+          "id": 801,
+          "name": "Comorbidity Impact Study in Oncology",
+          "n": 310,
+          "ageRange": "18–70+"
+        }
+      ]
+    },
+
+    "priorTreatment": {
+      "observed": [
+        { "label": "Chemotherapy", "value": 90 },
+        { "label": "Immunotherapy", "value": 70 },
+        { "label": "Targeted therapy", "value": 50 },
+        { "label": "Radiation", "value": 40 }
+      ],
+      "planned": [
+        { "label": "Chemotherapy", "value": 85 },
+        { "label": "Immunotherapy", "value": 65 },
+        { "label": "Targeted therapy", "value": 45 },
+        { "label": "Radiation", "value": 35 }
+      ],
+      "trials": [
+        {
+          "id": 901,
+          "name": "Prior Treatment Outcomes Study",
+          "n": 420,
+          "ageRange": "18–70+"
+        }
+      ]
+    },
+
+    "ecog": {
+      "observed": [
+        { "label": "ECOG 0", "value": 85 },
+        { "label": "ECOG 1", "value": 70 },
+        { "label": "ECOG 2", "value": 45 },
+        { "label": "ECOG 3+", "value": 30 }
+      ],
+      "planned": [
+        { "label": "ECOG 0", "value": 80 },
+        { "label": "ECOG 1", "value": 65 },
+        { "label": "ECOG 2", "value": 40 },
+        { "label": "ECOG 3+", "value": 25 }
+      ],
+      "trials": [
+        {
+          "id": 1001,
+          "name": "ECOG Performance Status Trial Analysis",
+          "n": 360,
+          "ageRange": "18–70+"
+        }
+      ]
+    }
+  }
+}

@@ -19,6 +19,10 @@ export const C = {
   muted: "rgba(0,0,0,0.45)",
   link: "rgba(38,102,190,1)",
   green: "rgba(75,145,78,1)",
+  // Slate/200 -- regimen chip fill; chipText is Black/600, one step lighter
+  // than body text so the chip label sits back behind the fill.
+  chipBg: "rgba(240,240,243,1)",
+  chipText: "rgba(0,0,0,0.6)",
   amber: "#b7791f",
   red: "#c53030",
 };

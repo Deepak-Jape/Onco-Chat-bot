@@ -1817,7 +1817,8 @@ PAGE = """<!doctype html>
  .cohort-row { cursor: pointer; }
  .cohort-row:hover td { background: #eef4ff; }
  .cohort-id { color: #2563eb; font-weight: 600; white-space: nowrap; }
- .cohort-insights { margin-top: 14px; }
+ .cohort-insights { margin-top: 14px; background: rgba(247,251,255,1);
+             border-top: 1px solid #F0F6FE; border-radius: 4px; padding: 16px; }
  .cohort-next { margin-top: 12px; }
  ul.nextsteps { list-style: none; padding: 0; margin: 6px 0 0; }
  ul.nextsteps li { margin: 6px 0; }

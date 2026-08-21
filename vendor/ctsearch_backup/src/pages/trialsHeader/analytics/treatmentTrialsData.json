@@ -1,0 +1,71 @@
+{
+  "status": "success",
+  "message": "Trial-level rows per graph for the drill-down table",
+  "data": {
+    "backbone": {
+      "title": "Top Backbones",
+      "columns": [
+        { "key": "trial", "label": "OncoSuite ID and Trial Name", "type": "trial" },
+        { "key": "indication", "label": "Indication" },
+        { "key": "phase", "label": "Phase" },
+        { "key": "backbone", "label": "Backbone" }
+      ],
+      "rows": [
+        { "oncoSuiteId": "123", "trialName": "Pembrolizumab in KRAS G12C-Mutated Non-Small Cell Lung Cancer", "indication": "1L KRAS G12C-Mutated NSCLC", "phase": "Phase 3", "backbone": "IO" },
+        { "oncoSuiteId": "124", "trialName": "Nivolumab plus Ipilimumab for Melanoma", "indication": "Advanced/Metastatic Melanoma", "phase": "Phase 2", "backbone": "Chemo" },
+        { "oncoSuiteId": "125", "trialName": "Atezolizumab in Triple-Negative Breast Cancer", "indication": "NSCLC", "phase": "Phase 3", "backbone": "Targeted therapy" },
+        { "oncoSuiteId": "126", "trialName": "Durvalumab for NSCLC", "indication": "HER2-Positive Breast Cancer", "phase": "Phase 1", "backbone": "Hormonal" },
+        { "oncoSuiteId": "127", "trialName": "Trastuzumab in HER2-Positive Breast Cancer", "indication": "Non-Hodgkin Lymphoma (NHL)", "phase": "Phase 4", "backbone": "Vaccine" },
+        { "oncoSuiteId": "128", "trialName": "Rituximab in Non-Hodgkin Lymphoma", "indication": "BRCA-Mutated Ovarian Cancer", "phase": "Phase 2", "backbone": "Radiological" },
+        { "oncoSuiteId": "129", "trialName": "Olaparib in BRCA-Mutated Ovarian Cancer", "indication": "BRAF-Mutated Melanoma", "phase": "Phase 3", "backbone": "ADC" },
+        { "oncoSuiteId": "130", "trialName": "Vemurafenib in BRAF-Mutated Melanoma", "indication": "BRAF-Mutated Melanoma", "phase": "Phase 2", "backbone": "Radiological" }
+      ]
+    },
+    "biomarker": {
+      "title": "Top Biomarkers",
+      "columns": [
+        { "key": "trial", "label": "OncoSuite ID and Trial Name", "type": "trial" },
+        { "key": "indication", "label": "Indication" },
+        { "key": "biomarker", "label": "Biomarker" },
+        { "key": "target", "label": "Target" }
+      ],
+      "rows": [
+        { "oncoSuiteId": "201", "trialName": "Osimertinib in EGFR Exon 19 NSCLC", "indication": "1L EGFR-Mutated NSCLC", "biomarker": "EGFR", "target": "EGFR Exon 19" },
+        { "oncoSuiteId": "202", "trialName": "Trastuzumab Deruxtecan in HER2+ Breast Cancer", "indication": "HER2-Positive Breast Cancer", "biomarker": "HER", "target": "HER2+" },
+        { "oncoSuiteId": "203", "trialName": "Vemurafenib in BRAF V600E Melanoma", "indication": "BRAF-Mutated Melanoma", "biomarker": "BRAF", "target": "BRAF V600E" },
+        { "oncoSuiteId": "204", "trialName": "Sotorasib in KRAS G12C NSCLC", "indication": "KRAS G12C NSCLC", "biomarker": "KRAS", "target": "KRAS G12C" },
+        { "oncoSuiteId": "205", "trialName": "Capmatinib in c-MET Exon 14 NSCLC", "indication": "c-MET Exon 14 NSCLC", "biomarker": "c-MET", "target": "MET Exon 14" }
+      ]
+    },
+    "mode": {
+      "title": "Mode of Administration",
+      "columns": [
+        { "key": "trial", "label": "OncoSuite ID and Trial Name", "type": "trial" },
+        { "key": "indication", "label": "Indication" },
+        { "key": "mode", "label": "Mode of Administration" },
+        { "key": "schedule", "label": "Schedule" }
+      ],
+      "rows": [
+        { "oncoSuiteId": "301", "trialName": "Pembrolizumab IV in NSCLC", "indication": "1L NSCLC", "mode": "IV", "schedule": "Q3W" },
+        { "oncoSuiteId": "302", "trialName": "Osimertinib Oral in EGFR NSCLC", "indication": "EGFR-Mutated NSCLC", "mode": "Oral", "schedule": "Daily" },
+        { "oncoSuiteId": "303", "trialName": "Trastuzumab SC in HER2+ Breast Cancer", "indication": "HER2-Positive Breast Cancer", "mode": "SC", "schedule": "Q3W" },
+        { "oncoSuiteId": "304", "trialName": "Intratumoral Vaccine in Melanoma", "indication": "Advanced Melanoma", "mode": "Intramural", "schedule": "Q2W" }
+      ]
+    },
+    "controlArms": {
+      "title": "Control Arms",
+      "columns": [
+        { "key": "trial", "label": "OncoSuite ID and Trial Name", "type": "trial" },
+        { "key": "indication", "label": "Indication" },
+        { "key": "drug", "label": "Control Drug" },
+        { "key": "phase", "label": "Phase" }
+      ],
+      "rows": [
+        { "oncoSuiteId": "401", "trialName": "Pembrolizumab vs Chemo in NSCLC", "indication": "1L NSCLC", "drug": "Pembrolizumab", "phase": "Phase 3" },
+        { "oncoSuiteId": "402", "trialName": "Ivonescimab Comparator Study", "indication": "Advanced NSCLC", "drug": "Ivonescimab", "phase": "Phase 2" },
+        { "oncoSuiteId": "403", "trialName": "Sotorasib Control Arm in KRAS NSCLC", "indication": "KRAS G12C NSCLC", "drug": "Sotorasib", "phase": "Phase 3" },
+        { "oncoSuiteId": "404", "trialName": "Gemcitabine Reference Arm", "indication": "Pancreatic Cancer", "drug": "Gemcitabine", "phase": "Phase 2" }
+      ]
+    }
+  }
+}

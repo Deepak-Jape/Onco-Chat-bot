@@ -28,11 +28,17 @@ body {
   color: #1f2937;
 }
 
-.app { display: flex; height: 100vh; overflow: hidden; }
-.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+/* Grey page ground; the white .main card (shell.css) floats on it. This rule is
+   unlayered, so it must set the background here -- a layer(components) rule in
+   shell.css would lose to it. */
+.app { display: flex; height: 100vh; overflow: hidden; background: #f4f6fa; }
+/* .main's layout/fill is in shell.css -- deliberately not repeated here, since
+   unlayered rules override it. */
 
-.thread { flex: 1; overflow-y: auto; padding: 24px 0; }
-.thread-inner { max-width: 900px; margin: 0 auto; padding: 0 24px; }
+/* Layout for these two lives in shell.css (grey page + full-width white card).
+   Rules here are UNLAYERED, so they would beat shell.css's layer(components)
+   regardless of order or specificity -- don't re-add width/padding here. */
+.thread { flex: 1; overflow-y: auto; }
 
 .msg { display: flex; gap: 14px; margin: 0 0 26px; }
 .avatar {
@@ -45,8 +51,9 @@ body {
 .msg-body { flex: 1; min-width: 0; padding-top: 3px; }
 .msg.user .msg-body { font-size: 15px; line-height: 1.5; }
 
+/* .composer-inner intentionally omitted -- see the .thread note above; its
+   width is set in shell.css. */
 .composer { border-top: 1px solid #eef1f6; padding: 14px 24px 20px; }
-.composer-inner { max-width: 760px; margin: 0 auto; }
 
 form.bar {
   display: flex; gap: 8px; align-items: center;
@@ -59,11 +66,15 @@ form.bar textarea {
   font-family: inherit; outline: none;
 }
 
+/* Send button per the Figma frame: 32x32, radius 20px, Info/600 fill.
+   NOTE: this rule is unlayered so it beats shell.css's layer(components) copy --
+   keep the two in sync or edit here. */
 .send-btn {
-  width: 34px; height: 34px; flex-shrink: 0; border: 0; border-radius: 50%;
-  background: #111827; color: #fff; font-size: 16px; cursor: pointer;
+  width: 32px; height: 32px; flex-shrink: 0; border: 0; border-radius: 20px;
+  background: rgba(38, 102, 190, 1); color: #fff; font-size: 16px; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
 }
+.send-btn:hover { background: #1d4ed8; }
 .send-btn:disabled { background: #c9cfda; cursor: not-allowed; }
 
 .card { border: 1px solid #e5e9f0; border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }

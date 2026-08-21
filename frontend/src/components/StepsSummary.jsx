@@ -1,6 +1,7 @@
 import { useState } from "react";
 // Local copy -- see the note in StepTrace.jsx (asset absent from the submodule).
 import diamondIcon from "../assets/Container.svg";
+import arrowIcon from "../assets/arrow.svg";
 
 /* Collapsed-by-default recap of the step trace that was live while the answer
    was being built. Same numbered "Step N -- Title / sub-detail" layout and
@@ -29,14 +30,21 @@ export default function StepsSummary({ steps = [] }) {
       <button type="button" style={HEAD} onClick={() => setOpen((v) => !v)}>
         <img src={diamondIcon} alt="" width={16} height={16} className="trace-diamond-icon" />
         Analyzing your query...
-        <span
+        {/* Shared arrow.svg, same as the table filter/disclosure arrows. It
+            points down, so collapsed is its natural orientation and open flips
+            it 180deg -- the old glyph pointed right and rotated 90deg. */}
+        <img
+          src={arrowIcon}
+          alt=""
+          aria-hidden="true"
+          width={9}
+          height={5}
           style={{
-            display: "inline-block", fontSize: 11, color: "rgba(0,0,0,0.35)",
-            transform: open ? "rotate(90deg)" : "none", transition: "transform .15s",
+            flexShrink: 0,
+            transform: open ? "rotate(180deg)" : "none",
+            transition: "transform .15s",
           }}
-        >
-          ▸
-        </span>
+        />
       </button>
 
       {open ? (

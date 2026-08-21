@@ -143,7 +143,9 @@
  .server-answer .cohort-row { cursor: pointer; }
  .server-answer .cohort-row:hover td { background: #eef4ff; }
  .server-answer .cohort-id { color: #2563eb; font-weight: 600; white-space: nowrap; }
- .server-answer .cohort-insights { margin-top: 14px; }
+ /* same tinted panel as the React insights block in App.jsx */
+ .server-answer .cohort-insights { margin-top: 14px; background: rgba(247,251,255,1);
+             border-top: 1px solid #F0F6FE; border-radius: 4px; padding: 16px; }
  .server-answer .cohort-next { margin-top: 12px; }
  .server-answer ul.nextsteps { list-style: none; padding: 0; margin: 6px 0 0; }
  .server-answer ul.nextsteps li { margin: 6px 0; }

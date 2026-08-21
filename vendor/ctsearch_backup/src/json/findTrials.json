@@ -1,0 +1,38 @@
+{
+"StudyStatus": {
+"LookingForParticipants": [
+"Not yet recruiting",
+"Recruiting"
+],
+"NoLongerLookingForParticipants": [
+"Active, not recruiting",
+"Completed",
+"Terminated"
+],
+"Other": [
+"Enrolling by invitation",
+"Suspended",
+"Withdrawn",
+"Unknown"
+]
+},
+"StudyPhase": [
+ { "id": 1, "name": "Early Phase 1"},
+    { "id": 2, "name": "Phase 1"},
+    { "id": 3, "name": "Phase 2"},
+    { "id": 4, "name": "Phase 3"},
+    { "id": 5, "name": "Phase 4"},
+    { "id": 6, "name": "Not applicable"}
+],
+"StudyType": {
+"Interventional":"",
+"Observational": [
+"Patient registries"
+],
+"Expanded access": [
+"Individual patients",
+"Intermediate-size population",
+"Treatment IND/Protocol"
+]
+}
+}

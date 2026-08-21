@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { BODY_CELL, BODY_ROW, BUTTON, C, CARD, CARD_TITLE, FONT, HEADER_CELL, HEADER_ROW } from "./tokens";
+import arrowIcon from "../assets/arrow.svg";
 
 /* Generic Figma-styled panel table -- used for Endpoints and Adverse Events.
 
@@ -36,7 +37,19 @@ function HeaderFilter({ col, options, selected, open, onOpenChange, onToggle }) 
         }}
       >
         {col.label}
-        <span style={{ fontSize: 9, color: C.muted }}>▼</span>
+        {/* shared arrow.svg -- flips while this column's filter popup is open */}
+        <img
+          src={arrowIcon}
+          alt=""
+          aria-hidden="true"
+          width={9}
+          height={5}
+          style={{
+            flexShrink: 0,
+            transform: open ? "rotate(180deg)" : "none",
+            transition: "transform 120ms ease",
+          }}
+        />
       </button>
 
       {open ? (

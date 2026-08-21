@@ -210,8 +210,6 @@ export default function Sidebar({
           </>
         )}
       </div>
-
-      <div className="sidebar-foot">Answers from the oncosuite_gold database.</div>
     </aside>
   );
 }

@@ -1,0 +1,173 @@
+{
+  "count": 27,
+  "results": [
+    {
+      "id": 1,
+      "name": "Pembrolizumab",
+      "brand": "Keytruda",
+      "class": "Immunotherapy"
+    },
+    {
+      "id": 2,
+      "name": "Trastuzumab deruxtecan",
+      "brand": "Enhertu",
+      "class": "Antibody-Drug Conjugate"
+    },
+    {
+      "id": 3,
+      "name": "Osimertinib",
+      "brand": "Tagrisso",
+      "class": "Tyrosine Kinase Inhibitor"
+    },
+    {
+      "id": 4,
+      "name": "Sacituzumab govitecan",
+      "brand": "Trodelvy",
+      "class": "Antibody-Drug Conjugate"
+    },
+    {
+      "id": 5,
+      "name": "Dostarlimab",
+      "brand": "Jemperli",
+      "class": "Immunotherapy"
+    },
+    {
+      "id": 6,
+      "name": "Atezolizumab",
+      "brand": "Tecentriq",
+      "class": "Immunotherapy"
+    },
+    {
+      "id": 7,
+      "name": "Nivolumab",
+      "brand": "Opdivo",
+      "class": "Immunotherapy"
+    },
+
+    {
+      "id": 8,
+      "name": "Durvalumab",
+      "brand": "Imfinzi",
+      "class": "Immunotherapy"
+    },
+    {
+      "id": 9,
+      "name": "Ipilimumab",
+      "brand": "Yervoy",
+      "class": "Immunotherapy"
+    },
+    {
+      "id": 10,
+      "name": "Cemiplimab",
+      "brand": "Libtayo",
+      "class": "Immunotherapy"
+    },
+
+    {
+      "id": 11,
+      "name": "Enfortumab vedotin",
+      "brand": "Padcev",
+      "class": "Antibody-Drug Conjugate"
+    },
+    {
+      "id": 12,
+      "name": "Polatuzumab vedotin",
+      "brand": "Polivy",
+      "class": "Antibody-Drug Conjugate"
+    },
+    {
+      "id": 13,
+      "name": "Brentuximab vedotin",
+      "brand": "Adcetris",
+      "class": "Antibody-Drug Conjugate"
+    },
+
+    {
+      "id": 14,
+      "name": "Erlotinib",
+      "brand": "Tarceva",
+      "class": "Tyrosine Kinase Inhibitor"
+    },
+    {
+      "id": 15,
+      "name": "Gefitinib",
+      "brand": "Iressa",
+      "class": "Tyrosine Kinase Inhibitor"
+    },
+    {
+      "id": 16,
+      "name": "Afatinib",
+      "brand": "Gilotrif",
+      "class": "Tyrosine Kinase Inhibitor"
+    },
+    {
+      "id": 17,
+      "name": "Crizotinib",
+      "brand": "Xalkori",
+      "class": "Tyrosine Kinase Inhibitor"
+    },
+    {
+      "id": 18,
+      "name": "Alectinib",
+      "brand": "Alecensa",
+      "class": "Tyrosine Kinase Inhibitor"
+    },
+
+    {
+      "id": 19,
+      "name": "Bevacizumab",
+      "brand": "Avastin",
+      "class": "Monoclonal Antibody"
+    },
+    {
+      "id": 20,
+      "name": "Rituximab",
+      "brand": "Rituxan",
+      "class": "Monoclonal Antibody"
+    },
+    {
+      "id": 21,
+      "name": "Cetuximab",
+      "brand": "Erbitux",
+      "class": "Monoclonal Antibody"
+    },
+
+    {
+      "id": 22,
+      "name": "Palbociclib",
+      "brand": "Ibrance",
+      "class": "CDK Inhibitor"
+    },
+    {
+      "id": 23,
+      "name": "Ribociclib",
+      "brand": "Kisqali",
+      "class": "CDK Inhibitor"
+    },
+    {
+      "id": 24,
+      "name": "Abemaciclib",
+      "brand": "Verzenio",
+      "class": "CDK Inhibitor"
+    },
+
+    {
+      "id": 25,
+      "name": "Olaparib",
+      "brand": "Lynparza",
+      "class": "PARP Inhibitor"
+    },
+    {
+      "id": 26,
+      "name": "Niraparib",
+      "brand": "Zejula",
+      "class": "PARP Inhibitor"
+    },
+    {
+      "id": 27,
+      "name": "Talazoparib",
+      "brand": "Talzenna",
+      "class": "PARP Inhibitor"
+    }
+  ]
+}

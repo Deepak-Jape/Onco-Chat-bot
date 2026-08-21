@@ -1,0 +1,102 @@
+
+{
+  "studyDetails": {
+    "basicInfo": {
+      "title": "A Study of XYZ-101 in Patients With Advanced Solid Tumors",
+      "nctId": "NCT07158489",
+      "status": "Recruiting",
+      "phase": "Phase 2",
+      "conditions": ["Non-Small Cell Lung Cancer"],
+      "studyType": "Interventional",
+      "enrollment": 220,
+      "startDate": "2024-06-01",
+      "completionDate": "2027-12-31",
+      "sponsor": "ABC Pharma Inc.",
+      "collaborators": ["National Cancer Institute"]
+    },
+    "tabs": {
+      "overview": {
+        "summary": "This study evaluates the efficacy and safety of XYZ-101 in patients with advanced non-small cell lung cancer (NSCLC) who progressed after prior therapies.",
+        "scientificBackgroundAndRationale": "XYZ-101 is a targeted small molecule inhibitor designed to block oncogenic pathways driving NSCLC. Preclinical and early clinical data demonstrate promising activity in EGFR-mutant populations with limited treatment options."
+      },
+      "eligibility": {
+        "inclusionCriteria": [
+          "Histologically confirmed advanced NSCLC",
+          "Progression after at least one prior line of therapy",
+          "ECOG performance status 0–1"
+        ],
+        "exclusionCriteria": [
+          "Active uncontrolled brain metastases",
+          "Significant cardiovascular disease",
+          "Prior exposure to XYZ-101"
+        ]
+      },
+      "locations": [
+        {
+          "site": "Memorial Sloan Kettering Cancer Center",
+          "city": "New York",
+          "country": "USA",
+          "status": "Recruiting"
+        },
+        {
+          "site": "MD Anderson Cancer Center",
+          "city": "Houston",
+          "country": "USA",
+          "status": "Recruiting"
+        }
+      ],
+      "results": {
+        "primaryOutcomes": [
+          {
+            "measure": "Objective Response Rate (ORR)",
+            "timeFrame": "Week 24",
+            "result": "52% (95% CI: 45–59%)"
+          }
+        ],
+        "secondaryOutcomes": [
+          {
+            "measure": "Progression-Free Survival (PFS)",
+            "timeFrame": "Median 12 months",
+            "result": "9.5 months"
+          },
+          {
+            "measure": "Overall Survival (OS)",
+            "timeFrame": "Median 24 months",
+            "result": "Not yet reached"
+          }
+        ],
+        "adverseEvents": [
+          {
+            "event": "Fatigue",
+            "frequency": "30%"
+          },
+          {
+            "event": "Diarrhea",
+            "frequency": "20%"
+          },
+          {
+            "event": "Rash",
+            "frequency": "15%"
+          }
+        ]
+      },
+      "documents": [
+        {
+          "type": "Protocol",
+          "link": "https://example.com/protocol.pdf"
+        },
+        {
+          "type": "Statistical Analysis Plan",
+          "link": "https://example.com/sap.pdf"
+        }
+      ],
+      "operationalMetrics": {
+        "enrollmentTarget": 220,
+        "currentEnrollment": 95,
+        "sitesOpened": 15,
+        "countriesInvolved": 3,
+        "avgTimeToEnroll": "2.5 months per patient"
+      }
+    }
+  }
+}

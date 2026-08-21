@@ -1,0 +1,64 @@
+
+[
+    {
+"age": "17",
+"blinding": "none",
+"comparative": ["nuclear medicine coordination procure-proradium"],
+"comparator_type": ["Standared care"],
+"condition": ["acceptance and commitment therapy"],
+"endpoints": ["Survival / Time-To-Event", "Response"],
+"facility": ["nagoya city university hospital"],
+"firstPostedFrom": "2025-10-01",
+"firstPostedTo": "2025-10-17",
+"intervention": ["'nitinella' ; sx-ella stent biliary (biliary metal stent)"],
+"lead_researcher": ["accelerated community oncology research network"],
+"lead_sponsor": ["abramson cancer center at penn medicine"],
+"line_therapy": ["1L"],
+"location": ["puerto rico"],
+"performance_status": ["ECOG 0", "Karnofsky <70"],
+"planned_enrollment": "187",
+"primaryCompletionFrom": "2025-10-06",
+"primaryCompletionTo": "2025-10-15",
+"randomized": "yes",
+"resultFirstPostedFrom": "2025-10-01",
+"resultFirstPostedTo": "2025-10-15",
+"result_posted": "yes",
+"sex": "male",
+"sites_count": "28",
+"sponsers_type": ["Big Pharma"],
+"stages": ["Localized (Stage 0-II)"],
+"studyStartFrom": "2025-10-15",
+"studyStartTo": "2025-10-24",
+"study_chosen": "Withdrawn",
+"study_document": ["Study Protocols"],
+"study_phase": ["1"],
+"study_status": ["Recruiting"],
+"study_type": ["Interventional"],
+"readout": {"bulk_date": "Next 6 Months","custom_end_date": "2025-10-22", "custom_start_date": "2025-10-06"},
+"moa_intervantion": ["agonists"],
+"moa_comparator": ["anticancer drugs"],
+"biomarker": ["[18f]f arag uptake"],
+"response_criteria": ["1999 iwg criteria"],
+"backbone": ["io+adc"],
+"nct_id": ["nct06750185"]
+},
+{
+    
+"readout"
+: 
+{"bulk_date": {"start_date": "2025-11-04", "end_date": "2026-05-04"}},
+
+"readout"
+: 
+{"custom_start_date": "2025-11-01"},
+"readout"
+: 
+{"custom_start_date": "2025-11-01"},
+
+"readout"
+: 
+{"custom_start_date": "2025-11-01", "custom_end_date ": "2025-11-03"}
+}
+
+]
+

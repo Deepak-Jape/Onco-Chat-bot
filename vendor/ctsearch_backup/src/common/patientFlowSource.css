@@ -1,0 +1,263 @@
+/* ============================================================================
+   PATIENT FLOW SOURCE — mock of the CT.gov "Participant Flow" results module.
+
+   Used by the data-traceability popover to show a Patient Flow figure the way
+   it appears on the source page, instead of as plain text.
+
+   Structure it expects:
+     .pf-source
+       .pf-source-heading            <- "Participant Flow" + ⓘ
+       .pf-source-details            <- Recruitment / Pre-assignment rows
+         .pf-source-detail-row
+           .pf-source-title-cell     <- label   ("Recruitment Details")
+           .pf-source-text-cell      <- prose
+       .pf-source-table              <- arm header + period groups
+         th.pf-source-sticky-col     <- "Arm/Group Title"
+         th                          <- arm names ("Durvalumab")
+         tr.pf-source-arm-desc       <- "Arm/Group Description" + per-arm prose
+         tr.pf-source-period         <- blue "Period Title: Overall Study" banner
+         tr.pf-source-subgroup       <- grey "Reason Not Completed" banner
+         td.pf-source-sticky-col     <- row label, right-aligned
+         td.pf-source-data-cell      <- figure, centered
+       .pf-source-note               <- "[1] Randomized" footnote
+
+   All values below are taken from the inspected source page.
+   ========================================================================== */
+
+.pf-source {
+  background: #ffffff;
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  color: #1b1b1b;
+  /* body line-height on the source page */
+  line-height: 1.62;
+  overflow-wrap: break-word;
+}
+
+/* --------------------------------------------------------------------------
+   Section heading — h2.section-heading
+   22px Roboto, #1B1B1B, margin 0 0 0 4px, padding 2px 0 0
+   -------------------------------------------------------------------------- */
+.pf-source-heading {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 22px;
+  line-height: 30.33px;
+  font-weight: 700;
+  color: #1b1b1b;
+  margin: 0 0 0 4px;
+  padding: 2px 0 0 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The ⓘ glossary affordance next to the heading. Decorative here — the real
+   page exposes it as a button that opens a glossary. */
+.pf-source-heading-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: 50%;
+  background: #1a3a6b;
+  color: #ffffff;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* --------------------------------------------------------------------------
+   Recruitment / Pre-assignment detail rows
+   .cell.title-cell : bg #F0F0F0, padding 4px 16px, 16px Roboto #1B1B1B
+   .text-cell       : padding 4px 16px, 16px Roboto #1B1B1B
+   -------------------------------------------------------------------------- */
+.pf-source-details {
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-bottom: none;
+  margin-top: 12px;
+}
+
+.pf-source-detail-row {
+  display: flex;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.pf-source-title-cell {
+  flex: 0 0 272px;
+  background: #f0f0f0;
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 25.91px;
+  font-weight: 700;
+  color: #1b1b1b;
+  padding: 4px 16px;
+  border-right: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.pf-source-text-cell {
+  flex: 1;
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 25.91px;
+  font-weight: 400;
+  color: #1b1b1b;
+  padding: 4px 16px;
+}
+
+/* --------------------------------------------------------------------------
+   The flow table
+   -------------------------------------------------------------------------- */
+.pf-source-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin-top: 12px;
+}
+
+/* Arm column headers — th, 16px Roboto #000, bg #F0F0F0, padding 8px.
+   Centered like the source's arm names. */
+.pf-source-table th {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 400;
+  color: #000000;
+  background: #f0f0f0;
+  padding: 8px;
+  text-align: center;
+  vertical-align: middle;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+/* Frozen first column — th/td.sticky-col:
+   14px Roboto, #000, bg #F0F0F0, padding 10px 8px 8px, right-aligned,
+   border-width 0 2px 1px 1px with the blue-warm-80v right edge. */
+.pf-source-table .pf-source-sticky-col {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 19px;
+  font-weight: 400;
+  color: #000000;
+  background: #f0f0f0;
+  padding: 10px 8px 8px;
+  text-align: right;
+  vertical-align: top;
+  border-width: 0 2px 1px 1px;
+  border-style: solid;
+  border-color: rgba(0, 0, 0, 0.25);
+  border-right-color: #8ba6c9; /* --ctgl-color-blue-warm-80v */
+  width: 162px;
+}
+
+/* Arm/Group Description row — per-arm prose at 16px, top-aligned. */
+.pf-source-arm-desc td {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 25.91px;
+  font-weight: 400;
+  color: #1b1b1b;
+  padding: 8px;
+  vertical-align: top;
+  text-align: left;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+/* Blue period banner — "Period Title: Overall Study".
+   .sticky-group-panel: #fff text, padding 8px 4px 8px 12px.
+   .group-title-text  : 14px Roboto #FFFFFF (the period name is bolded). */
+.pf-source-period td {
+  background: #0071bc;
+  padding: 8px 4px 8px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.pf-source-period .pf-source-group-title-text {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 19px;
+  font-weight: 400;
+  color: #ffffff;
+}
+
+.pf-source-period .pf-source-group-title-text strong {
+  font-weight: 700;
+}
+
+/* Grey subgroup banner — "Reason Not Completed".
+   .sticky-subgroup-panel: #fff text, padding 8px 4px 8px 12px. */
+.pf-source-subgroup td {
+  background: #8c8c8c;
+  padding: 8px 4px 8px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.pf-source-subgroup .pf-source-group-title-text {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 17px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+/* Data cells — padding 8px; .cell-value 16px Roboto #1B1B1B, centered. */
+.pf-source-table td.pf-source-data-cell {
+  padding: 8px;
+  text-align: center;
+  vertical-align: middle;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.pf-source-cell-value {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 19px;
+  font-weight: 400;
+  color: #1b1b1b;
+}
+
+/* The [1] footnote marker after a row label, e.g. "Started[1]". */
+.pf-source-footnote-marker {
+  font-size: 11px;
+  vertical-align: super;
+  color: #005ea2;
+}
+
+/* Footnote row under the table — .note-text 16px Roboto #1B1B1B,
+   padding 0 0 0 8px. The "[1]" key itself is the link blue. */
+.pf-source-note {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-top: none;
+  padding: 8px 16px;
+}
+
+.pf-source-note-key {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  color: #005ea2;
+  flex: 0 0 auto;
+}
+
+.pf-source-note-text {
+  font-family: Roboto, Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 25.91px;
+  font-weight: 400;
+  color: #1b1b1b;
+  padding: 0 0 0 8px;
+}
+
+/* Keyword highlight — same amber as the other traceability snippets. */
+.pf-source mark.pf-source-mark,
+.pf-source-mark {
+  background-color: rgba(253, 190, 0, 1);
+  color: #000000;
+  padding: 0 2px;
+  border-radius: 2px;
+  font-weight: 600;
+}
