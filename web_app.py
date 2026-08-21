@@ -273,7 +273,7 @@ def render_direct_answer(question, tr):
     # output, so repeating it here would just print the same sentence twice.
 
     def _banner(label, val, sub=None):
-        sub = sub if sub is not None else f'for {esc(tr.get("nct_id"))}'
+        sub = sub if sub is not None else f'for {esc(tr.get("oncosuite_id"))}'
         return (f'<div class="answer"><span class="answer-lbl">{esc(label)}</span>'
                 f'<span class="answer-val">{esc(val)}</span>'
                 f'<span class="answer-sub">{sub}</span></div>')
@@ -338,20 +338,14 @@ def render_direct_answer(question, tr):
         if loc.get("total_sites"):
             top = ", ".join(f'{r["country"]} ({r["site_count"]})' for r in loc.get("by_country", [])[:5])
             val = f'{loc["total_sites"]} sites across {loc["total_countries"]} countries'
-            return (f'<div class="answer"><span class="answer-lbl">Trial locations</span>'
-                    f'<span class="answer-val">{esc(val)}</span>'
-                    f'<span class="answer-sub">Top: {esc(top)} &middot; for {esc(tr.get("nct_id"))}</span></div>')
-        return (f'<div class="answer"><span class="answer-lbl">Trial locations</span>'
-                f'<span class="answer-val">No sites recorded</span>'
-                f'<span class="answer-sub">for {esc(tr.get("nct_id"))}</span></div>')
+            return _banner("Trial locations", val, f"Top: {esc(top)} &middot; for {esc(tr.get('oncosuite_id'))}")
+        return _banner("Trial locations", "No sites recorded")
     for keywords, label, getter in DIRECT_FIELDS:
         if any(k in q for k in keywords):
             val = getter(tr)
             if val in (None, "", []):
                 val = "Not recorded for this trial"
-            return (f'<div class="answer"><span class="answer-lbl">{esc(label)}</span>'
-                    f'<span class="answer-val">{esc(val)}</span>'
-                    f'<span class="answer-sub">for {esc(tr.get("nct_id"))}</span></div>')
+            return _banner(label, val)
     return ""
 
 
@@ -394,19 +388,28 @@ def _leading_number(val):
     return float(m.group(0)) if m else None
 
 
+def _endpoint_header_block(ep):
+    """Opening '<div class="arm"><strong>name</strong> <span class="pill">type
+    &middot; abbrev</span>' block shared by render_endpoints and
+    render_endpoints_and_outcomes -- both list an endpoint's name/type/
+    abbreviation the same way before diverging into different result tables."""
+    head = esc(ep.get("endpoint_name"))
+    meta = " &middot; ".join(
+        esc(x) for x in (ep.get("endpoint_type"), ep.get("endpoint_abbreviation")) if x
+    )
+    block = [f'<div class="arm"><strong>{head}</strong>']
+    if meta:
+        block.append(f' <span class="pill">{meta}</span>')
+    return block
+
+
 def render_endpoints(endpoints):
     if not endpoints:
         return ""
     from charts import bar_chart
     blocks = []
     for ep in endpoints:
-        head = esc(ep.get("endpoint_name"))
-        meta = " &middot; ".join(
-            esc(x) for x in (ep.get("endpoint_type"), ep.get("endpoint_abbreviation")) if x
-        )
-        block = [f'<div class="arm"><strong>{head}</strong>']
-        if meta:
-            block.append(f' <span class="pill">{meta}</span>')
+        block = _endpoint_header_block(ep)
         results = ep.get("results") or []
         if results:
             # Chart the per-arm values when they're numeric so arms can be compared
@@ -468,13 +471,7 @@ def render_endpoints_and_outcomes(tr):
 
     cards = []
     for ep in endpoints:
-        head = esc(ep.get("endpoint_name"))
-        meta = " &middot; ".join(
-            esc(x) for x in (ep.get("endpoint_type"), ep.get("endpoint_abbreviation")) if x
-        )
-        block = [f'<div class="arm"><strong>{head}</strong>']
-        if meta:
-            block.append(f' <span class="pill">{meta}</span>')
+        block = _endpoint_header_block(ep)
         outcomes = ep.get("outcomes") or []
         if outcomes:
             rows = "".join(
@@ -626,7 +623,7 @@ def render_trial_detail(tr, question=""):
         parts += [
             '<div class="card">',
             f'<div class="tag">{esc(tr.get("trial_phase"))} &middot; {esc(tr.get("study_status"))}</div>',
-            f'<h2>{esc(tr.get("nct_id"))}</h2>',
+            f'<h2>{esc(tr.get("oncosuite_id"))}</h2>',
             f'<p class="title">{esc(tr.get("official_title"))}</p>',
             '<div class="grid">',
             f'<div><span class="lbl">Sponsor</span>{esc(tr.get("sponsor_name"))}</div>',
@@ -689,6 +686,50 @@ def render_trial_detail(tr, question=""):
     return direct + "".join(parts)
 
 
+def _render_pooled_view(rows, active_keys, catalog):
+    """Deterministic 'Pooled' companion to a raw result table -- grouped
+    counts/distributions and numeric medians from pooled_analytics, grouped by
+    phase/indication so figures are never averaged across incomparable rows.
+    Shared by the trial-search and cohort-search tables."""
+    from column_catalog import label_for
+    from pooled_analytics import build_pooled_view
+    groups = build_pooled_view(rows, active_keys).get("groups") or []
+    if not groups:
+        return '<div class="card"><p class="muted">Not enough data to pool.</p></div>'
+    cards = []
+    for g in groups:
+        parts = [f'<h4 class="synth-h">{esc(g["label"])} <span class="muted">(n={g["n"]})</span></h4>']
+        for key, tally in g["categorical"].items():
+            if not tally["items"]:
+                continue
+            items = ", ".join(f"{esc(v)} ({c})" for v, c in tally["items"])
+            more = f", +{tally['more']} more" if tally["more"] else ""
+            parts.append(f'<p><strong>{esc(label_for(catalog, key))}:</strong> {items}{more}</p>')
+        for key, stat in g["numeric"].items():
+            parts.append(
+                f'<p><strong>{esc(label_for(catalog, key))}:</strong> median {stat["median"]:g} '
+                f'(range {stat["min"]:g}–{stat["max"]:g}, n={stat["n"]})</p>'
+            )
+        cards.append(f'<div class="card pooled-card">{"".join(parts)}</div>')
+    return "".join(cards)
+
+
+def _view_toggle(raw_html, pooled_html):
+    """Wrap a raw table and its pooled-analytics companion in a Raw/Pooled
+    toggle -- both are pre-rendered server-side, JS just shows/hides
+    (see the .view-toggle delegate in the embedded page's <script>)."""
+    return (
+        '<div class="view-toggle-wrap">'
+        '<div class="view-toggle">'
+        '<button class="active" data-view="raw">Raw</button>'
+        '<button data-view="pooled">Pooled</button>'
+        '</div>'
+        f'<div class="view-panel" data-view="raw">{raw_html}</div>'
+        f'<div class="view-panel" data-view="pooled" hidden>{pooled_html}</div>'
+        '</div>'
+    )
+
+
 def render_search_results(tr):
     results = tr.get("results", [])
     if not results:
@@ -712,20 +753,42 @@ def render_search_results(tr):
 
     # The actual matched trials -- previously only the count and phase donut
     # above were rendered, so a search answer never showed which trials it
-    # actually found. NCT id is left as plain text so linkify_trial_ids (run
-    # over the whole html block) wraps it into the same clickable
+    # actually found. OncoSuite id is left as plain text so linkify_trial_ids
+    # (run over the whole html block) wraps it into the same clickable
     # trial-detail-drawer button every other trial id in an answer gets.
+    #
+    # Columns are whatever search_trials actually returned (its "columns" key,
+    # from column_catalog.TRIAL_COLUMNS) rather than a hardcoded 5, so a query
+    # that asked for extra detail (sponsor type, lead org, ...) renders it --
+    # oncosuite_id/nct_id are still collapsed into one "Trial" identifier
+    # column, matching the identifier chip look every other trial table uses.
+    from column_catalog import TRIAL_COLUMNS, label_for
+    active_keys = tr.get("columns") or ["oncosuite_id", "nct_id", "title", "phase",
+                                        "status", "sponsor", "enrollment", "start_date"]
+    display_keys = []
+    seen_id = False
+    for k in active_keys:
+        if k in ("oncosuite_id", "nct_id"):
+            if not seen_id:
+                display_keys.append("__trial_id__")
+                seen_id = True
+            continue
+        display_keys.append(k)
+
+    def _header(k):
+        return "Trial" if k == "__trial_id__" else label_for(TRIAL_COLUMNS, k)
+
+    def _cell(r, k):
+        if k == "__trial_id__":
+            return r.get("oncosuite_id") or r.get("nct_id") or ""
+        return r.get(k)
+
     rows = ['<div class="table-wrap"><table class="data-table"><thead><tr>'
-            '<th>Trial</th><th>Title</th><th>Sponsor</th><th>Phase</th>'
-            '<th>Status</th></tr></thead><tbody>']
+            + "".join(f"<th>{esc(_header(k))}</th>" for k in display_keys)
+            + '</tr></thead><tbody>']
     for r in results:
-        ident = r.get("nct_id") or r.get("oncosuite_id") or ""
         rows.append(
-            f'<tr><td>{esc(ident)}</td>'
-            f'<td>{esc(r.get("title"))}</td>'
-            f'<td>{esc(r.get("sponsor"))}</td>'
-            f'<td>{esc(r.get("phase"))}</td>'
-            f'<td>{esc(r.get("status"))}</td></tr>'
+            "<tr>" + "".join(f"<td>{esc(_cell(r, k))}</td>" for k in display_keys) + "</tr>"
         )
     rows.append("</tbody></table></div>")
 
@@ -744,7 +807,7 @@ def render_compare_arms(tr):
             return f'<div class="card warn"><p>{msg}</p></div>'
         items = []
         for c in cands:
-            nct = c.get("nct_id") or c.get("oncosuite_id") or ""
+            nct = c.get("oncosuite_id") or c.get("nct_id") or ""
             phase = f' &middot; {esc(c.get("phase"))}' if c.get("phase") else ""
             title = esc(c.get("title") or "")
             # Clicking re-asks the arm comparison scoped to this specific trial.
@@ -790,16 +853,6 @@ def _trial_chips(trial_ids):
     return " ".join(chips)
 
 
-def _classify_sponsor(sponsor_name):
-    """Heuristic Industry vs Academic classification by sponsor NAME (no authoritative
-    sponsor-type field exists in the schema). Mirrors search_trials' patterns."""
-    if not sponsor_name:
-        return "Unknown"
-    from tools.search_trials import ACADEMIC_SPONSOR_PATTERNS
-    s = sponsor_name.lower()
-    return "Academic" if any(p in s for p in ACADEMIC_SPONSOR_PATTERNS) else "Industry"
-
-
 def _render_source_trials_table(hits):
     """Replace the raw snippet cards with ONE clean summary table of the source trials:
     trial id (clickable), title, sponsor type, and enrollment status. Enriches each
@@ -829,6 +882,7 @@ def _render_source_trials_table(hits):
         info = {}
 
     from charts import simple_table
+    from tools.search_trials import _classify_sponsor
     body = []
     snippet_by_id = {h.get("ref_id"): (h.get("snippet") or "") for h in hits}
     for tid in ids:
@@ -1036,23 +1090,6 @@ def _plain_cell(cell: str) -> str:
     return s.strip()
 
 
-def _table_dl_button(csv_rows: list, filename: str) -> str:
-    """Toolbar with a Download CSV button carrying the table's data inline.
-
-    The CSV is base64'd into a data attribute (same approach as the cohort table)
-    so the download needs no extra round-trip and always matches what is shown."""
-    import base64
-
-    def cell(x):
-        return '"' + str(x if x is not None else "").replace('"', '""') + '"'
-
-    csv_text = "\n".join(",".join(cell(c) for c in row) for row in csv_rows)
-    b64 = base64.b64encode(csv_text.encode("utf-8")).decode("ascii")
-    return (f'<div class="tbl-toolbar">'
-            f'<button class="dl-btn" data-csv="{b64}" data-name="{esc(filename)}">'
-            f'&#10515; Download CSV</button></div>')
-
-
 # Rows shown per page in a rendered answer table. Long result sets (1,500+
 # trials) are unusable as one scroll, so the markup carries every row and the
 # front-end reveals one page at a time.
@@ -1117,9 +1154,6 @@ def render_markdown_lite(md: str) -> str:
                       if h.strip().lower() in ("phase", "status", "reported outcomes")}
         filter_values = {i: [] for i in filter_cols}  # first-seen order, deduped
 
-        # Collect the raw (un-marked-up) cells alongside the rendered ones so the
-        # Download CSV button exports exactly what the table shows.
-        csv_rows = [head_cells]
         body_html = []
         for r in rows[1:]:
             cells = [c.strip() for c in r.strip("|").split("|")]
@@ -1127,8 +1161,9 @@ def render_markdown_lite(md: str) -> str:
             while len(cells) < len(head_cells):
                 cells.append("")
             cells = cells[:len(head_cells)]
+            # plain (un-marked-up) cell text, needed for the header-dropdown
+            # filter's data-f<i> match values below.
             plain = [_plain_cell(c) for c in cells]
-            csv_rows.append(plain)
             for i in filter_cols:
                 if plain[i] and plain[i] not in filter_values[i]:
                     filter_values[i].append(plain[i])
@@ -1172,7 +1207,6 @@ def render_markdown_lite(md: str) -> str:
         out.append('<div class="tbl-block"'
                    + (f' data-pages="{pages}"' if pages > 1 else "")
                    + ">"
-                   + _table_dl_button(csv_rows, "table.csv")
                    + "<div class='table-wrap'><table class='data-table'><thead><tr>"
                    + "".join(_th(i, c) for i, c in enumerate(head_cells))
                    + "</tr></thead><tbody>")
@@ -1218,6 +1252,28 @@ def render_markdown_lite(md: str) -> str:
     return "\n".join(out)
 
 
+def _regimen_cell_html(r):
+    """Regimen cell as one badge per drug in the combination. A badge whose drug
+    has treatment_info detail (dosage/schedule/duration/treatment status/route --
+    search_cohorts.regimen_drug_details, straight from oncosuite_gold.treatment_info)
+    carries a data-drug payload the page's hover-tooltip JS reads on mouseover; a
+    badge with no matching detail (e.g. its treatment_info row predates this join,
+    or the name didn't line up) still renders, just without the hover."""
+    regimen = r.get("regimen")
+    if not regimen or regimen == "Not specified":
+        return "—"
+    detail = r.get("regimen_detail") or {}
+    badges = []
+    for name in [n.strip() for n in regimen.split(" + ") if n.strip()]:
+        d = detail.get(name)
+        if not d:
+            badges.append(f'<span class="drug-badge">{esc(name)}</span>')
+            continue
+        payload = esc(json.dumps({"name": name, **d}))
+        badges.append(f'<span class="drug-badge drug-badge-tip" data-drug="{payload}">{esc(name)}</span>')
+    return " ".join(badges)
+
+
 def render_cohort_list(syn: dict) -> str:
     """Interactive cohort table per the client's spec: a 'N cohorts within M
     trials' lead line, a scrollable table whose rows are CLICKABLE (each fires a
@@ -1230,42 +1286,51 @@ def render_cohort_list(syn: dict) -> str:
     rows = syn["rows"]
     lead = render_markdown_lite(syn.get("lead", ""))
 
+    # Columns are whatever search_cohorts actually returned (its "columns" key,
+    # from column_catalog.COHORT_COLUMNS) rather than a hardcoded 5, so a query
+    # that asked for extra detail (biomarker variant, cancer stage, target, ...)
+    # renders it.
+    from column_catalog import COHORT_COLUMNS, label_for
+    active_keys = syn.get("columns") or ["oncosuite_id", "indication", "regimen", "phase", "status"]
+
     # Rows: each is clickable. data-q holds the follow-up question the front-end
     # sends on click (asks for that specific trial's executive summary). The id
-    # shown is the public NCT id when available, else the internal OncoSuite id.
+    # shown is the internal OncoSuite id, falling back to the public NCT id
+    # only when a trial has no OncoSuite id on record.
+    def _cohort_cell(r, k):
+        if k == "oncosuite_id":
+            return r.get("oncosuite_id") or r.get("nct_id") or ""
+        return r.get(k)
+
     body = []
     for r in rows:
-        ident = r.get("nct_id") or r.get("oncosuite_id") or ""
+        ident = r.get("oncosuite_id") or r.get("nct_id") or ""
         follow = f"Give me the executive summary of trial {ident}"
+        cells = []
+        for k in active_keys:
+            if k == "regimen":
+                cells.append(f'<td class="regimen-cell">{_regimen_cell_html(r)}</td>')
+                continue
+            val = _cohort_cell(r, k)
+            cls = ' class="cohort-id"' if k == "oncosuite_id" else ""
+            cells.append(f'<td{cls}>{esc(val) if val not in (None, "") else "—"}</td>')
         body.append(
             f'<tr class="cohort-row" data-q="{esc(follow)}" title="Click for this trial\'s executive summary">'
-            f'<td class="cohort-id">{esc(ident)}</td>'
-            f'<td>{esc(r.get("indication") or "—")}</td>'
-            f'<td>{esc(r.get("regimen") or "—")}</td>'
-            f'<td>{esc(r.get("phase") or "—")}</td>'
-            f'<td>{esc(r.get("status") or "—")}</td>'
-            f'</tr>'
+            + "".join(cells) +
+            '</tr>'
         )
 
-    # CSV for the download button, embedded as a data attribute (base64 avoids
-    # quoting headaches). Built from the same rows shown -- no separate query.
-    import base64
-    csv_lines = ["OncoSuite/NCT ID,Indication,Regimen,Phase,Status"]
-    for r in rows:
-        def c(x): return '"' + str(x or "").replace('"', '""') + '"'
-        csv_lines.append(",".join(c(r.get(k)) for k in
-                                  ("nct_id", "indication", "regimen", "phase", "status")))
-    csv_b64 = base64.b64encode("\n".join(csv_lines).encode("utf-8")).decode("ascii")
-
     # Excel companion for the same rows, with source-traceability comments on
-    # Phase/Status/Indication -- CSV can't carry comments (requirement this is
-    # answering), and this legacy page has no other export path. Reuses
-    # oncosuite_gold.data_traceability directly via traceability.py, same as
-    # the React CohortTable's Excel export in dashboard.py. Skipped entirely
-    # (not a hard failure) if openpyxl is missing or the DB lookup errors --
-    # the CSV button above must keep working regardless.
+    # Phase/Status/Indication -- a plain export can't carry comments, and this
+    # legacy page has no other export path. Reuses oncosuite_gold.data_traceability
+    # directly via traceability.py, same as the React CohortTable's Excel export
+    # in dashboard.py. Skipped entirely (not a hard failure) if openpyxl is
+    # missing or the DB lookup errors -- the table above must keep working
+    # regardless.
     xlsx_b64 = None
     try:
+        import base64
+
         from excel_export import build_xlsx
         from traceability import (
             format_comment, raw_trace_by_oncosuite_id, raw_trace_by_record_id,
@@ -1286,23 +1351,30 @@ def render_cohort_list(syn: dict) -> str:
             ["phase", "line_of_therapy", "biomarkers", "histology", "organ"],
         )
 
+        # Extra opt-in columns (beyond the base 5) mirror the on-screen table's
+        # active_keys but have no source-traceability mapping yet -- they still
+        # get a plain xlsx column, just without a comment/evidence sheet entry.
+        extra_keys = [k for k in active_keys
+                     if k not in ("oncosuite_id", "indication", "regimen", "phase", "status")]
+
         xlsx_columns = [
-            {"key": "id", "label": "OncoSuite / NCT ID"},
+            {"key": "id", "label": "OncoSuite ID"},
             {"key": "indication", "label": "Indication"},
             {"key": "regimen", "label": "Regimen"},
             {"key": "phase", "label": "Phase"},
             {"key": "status", "label": "Status"},
-        ]
+        ] + [{"key": k, "label": label_for(COHORT_COLUMNS, k)} for k in extra_keys]
         xlsx_rows = []
         comments = {}
         evidence = {}
         for row_i, r in enumerate(rows):
             xlsx_rows.append({
-                "id": r.get("nct_id") or r.get("oncosuite_id") or "",
+                "id": r.get("oncosuite_id") or r.get("nct_id") or "",
                 "indication": r.get("indication"),
                 "regimen": r.get("regimen"),
                 "phase": r.get("phase"),
                 "status": r.get("status"),
+                **{k: r.get(k) for k in extra_keys},
             })
             cid, oid = r.get("cohort_id"), r.get("oncosuite_id")
 
@@ -1354,19 +1426,25 @@ def render_cohort_list(syn: dict) -> str:
                         for s in syn["next_steps"])
         next_steps = f'<div class="cohort-next"><h4 class="synth-h">Next Steps</h4><ul class="nextsteps">{items}</ul></div>'
 
+    table_html = (
+        '<div class="table-wrap cohort-wrap"><table class="data-table cohort-table"><thead><tr>'
+        + "".join(f"<th>{esc(label_for(COHORT_COLUMNS, k))}</th>" for k in active_keys)
+        + '</tr></thead><tbody>'
+        + "".join(body) +
+        '</tbody></table></div>'
+    )
+    if len(rows) > 1:
+        pooled_html = _render_pooled_view(rows, active_keys, COHORT_COLUMNS)
+        table_html = _view_toggle(table_html, pooled_html)
+
     return (
         '<div class="cohort-answer">'
         f'<div class="cohort-lead">{lead}</div>'
         '<div class="cohort-toolbar">'
-        f'<button class="dl-btn" data-csv="{csv_b64}" data-name="cohorts.csv">⤓ Download CSV</button>'
         f'{xlsx_button}'
         '<span class="cohort-hint">Click any row for that trial\'s executive summary</span>'
         '</div>'
-        '<div class="table-wrap cohort-wrap"><table class="data-table cohort-table"><thead><tr>'
-        '<th>OncoSuite / NCT ID</th><th>Indication</th><th>Regimen</th><th>Phase</th><th>Status</th>'
-        '</tr></thead><tbody>'
-        + "".join(body) +
-        '</tbody></table></div>'
+        + table_html
         + insights + next_steps +
         '</div>'
     )
@@ -1430,28 +1508,6 @@ def smalltalk_reply(q):
     return None
 
 
-def _replace_csv_with_full_rows(html: str, full_rows: list) -> str:
-    """Swap the auto-embedded Download CSV data (built from only the visible
-    page of a "show all" trial list) for one covering every matching trial, so
-    the export isn't silently capped at whatever page happened to be on screen."""
-    if not full_rows or "data-csv=" not in html:
-        return html
-    import base64
-
-    def cell(x):
-        return '"' + str(x if x is not None else "").replace('"', '""') + '"'
-
-    header = ["#", "NCT ID", "Trial", "Phase", "Status", "Sponsor", "Enrollment"]
-    csv_lines = [",".join(cell(h) for h in header)]
-    for i, r in enumerate(full_rows, start=1):
-        csv_lines.append(",".join(cell(v) for v in (
-            i, r.get("nct_id") or "—", (r.get("title") or "")[:80], r.get("phase") or "—",
-            r.get("status") or "—", r.get("sponsor") or "—", r.get("enrollment") or "—",
-        )))
-    b64 = base64.b64encode("\n".join(csv_lines).encode("utf-8")).decode("ascii")
-    return re.sub(r'data-csv="[^"]*"', f'data-csv="{b64}"', html, count=1)
-
-
 def render_answer(resp, question=""):
     mode = resp.get("response_mode")
     intent = resp.get("intent")
@@ -1499,9 +1555,6 @@ def render_answer(resp, question=""):
         return banner + syn + table_html
 
     synthesis_html = render_synthesis(resp.get("synthesis"))
-    full_rows = (resp.get("synthesis") or {}).get("full_rows")
-    if full_rows:
-        synthesis_html = _replace_csv_with_full_rows(synthesis_html, full_rows)
 
     if tool == "text_to_sql":
         # LLM-written-SQL fallback: the phrased answer, an auto-chart if the rows
@@ -1537,10 +1590,9 @@ def render_answer(resp, question=""):
                     f'<pre>{esc(sql)}</pre></details>') if sql else ""
         if not synthesis_html and not table_html:
             return banner + '<div class="card">I found no matching data for that question.</div>'
-        # Answer text FIRST: it's the framing for the chart/table that follow, so
-        # the reader knows what job each piece below is doing before seeing it,
-        # rather than hitting a bare chart with no explanation of why it's there.
-        return banner + synthesis_html + chart_html + table_html + sql_html
+        # Table-first: the chart/table is the primary response, with the
+        # synthesis prose as the framing/explanation that follows it.
+        return banner + chart_html + table_html + synthesis_html + sql_html
 
     if tool == "get_trial_detail":
         # Unresolvable id (e.g. a bad oncosuite id) -> show the plain message, not a
@@ -1552,24 +1604,28 @@ def render_answer(resp, question=""):
         id_note_html = ""
         if (tr or {}).get("id_note"):
             id_note_html = f'<div class="synth-body">{render_markdown_lite(tr["id_note"])}</div>'
+        # Table-first: the detail view is the primary response, the synthesis
+        # prose is the framing/explanation that follows it.
         detail_html = render_trial_detail(tr, question)
-        focused = bool(_detail_focus(question))  # non-empty set => a specific ask
-        if focused:
-            return banner + id_note_html + detail_html + synthesis_html
-        return banner + id_note_html + synthesis_html + detail_html
+        return banner + id_note_html + detail_html + synthesis_html
     if tool == "search_trials":
         # The synthesis already renders every matching trial as a table, so
         # emitting a card per trial underneath just repeats every row. Keep
         # the cards only when there is no table.
-        if "<table" in synthesis_html:
-            return banner + synthesis_html
-        return banner + synthesis_html + render_search_results(tr)
+        raw_block = (synthesis_html if "<table" in synthesis_html
+                    else render_search_results(tr) + synthesis_html)
+        results = (tr or {}).get("results") or []
+        if len(results) > 1:
+            from column_catalog import TRIAL_COLUMNS
+            pooled_html = _render_pooled_view(results, tr.get("columns"), TRIAL_COLUMNS)
+            return banner + _view_toggle(raw_block, pooled_html)
+        return banner + raw_block
     if tool == "get_competitive_landscape":
-        return banner + synthesis_html + render_landscape(tr)
+        return banner + render_landscape(tr) + synthesis_html
     if tool == "compare_arms":
-        return banner + synthesis_html + render_compare_arms(tr)
+        return banner + render_compare_arms(tr) + synthesis_html
     if tool == "get_endpoints_and_outcomes":
-        return banner + synthesis_html + render_endpoints_and_outcomes(tr)
+        return banner + render_endpoints_and_outcomes(tr) + synthesis_html
     # A tool that returned only an error has nothing to render as data. Show the
     # message plainly instead of dumping {"error": ...} as JSON at the user --
     # this is what an under-specified question (e.g. asking for "the primary
@@ -1789,12 +1845,8 @@ PAGE = """<!doctype html>
  .data-table td { padding: 8px 12px; border-bottom: 1px solid #f2f4f8; color: #1f2937;
                   vertical-align: top; line-height: 1.45; }
  .data-table tr:last-child td { border-bottom: 0; }
- /* every rendered table gets its own Download CSV toolbar, right-aligned above it */
  .tbl-block { margin: 12px 0; }
  .tbl-block .table-wrap { margin-top: 0; }
- .tbl-toolbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
- .tbl-toolbar .dl-btn { background:#fff; color:#374151; border:1px solid #d7deea; font-weight:500; }
- .tbl-toolbar .dl-btn:hover { background:#f2f5fa; border-color:#c3d0e8; color:#111827; }
  /* ---- cohort answer (client spec: clickable rows + download + insights) ---- */
  .cohort-answer { margin: 4px 0; }
  .cohort-lead { font-size: 14px; margin-bottom: 8px; }
@@ -1807,6 +1859,34 @@ PAGE = """<!doctype html>
  .cohort-row { cursor: pointer; }
  .cohort-row:hover td { background: #eef4ff; }
  .cohort-id { color: #2563eb; font-weight: 600; white-space: nowrap; }
+ /* Regimen badges + their drug-detail hover tooltip (dosage/schedule/duration/
+    treatment status/route from oncosuite_gold.treatment_info). The tooltip is a
+    single shared #drugTip element positioned in JS with position:fixed, rather
+    than a per-badge absolutely-positioned child -- .cohort-wrap below scrolls
+    (overflow:auto) and would clip an in-flow tooltip at the row's edge. */
+ .regimen-cell { white-space: normal; }
+ .drug-badge { display: inline-block; background: #eef2f8; color: #374151; font-size: 12px;
+               padding: 3px 8px; border-radius: 5px; margin: 2px 4px 2px 0; }
+ .drug-badge-tip { cursor: default; }
+ .drug-badge-tip:hover { background: #e2e8f5; }
+ .drug-tip { position: fixed; z-index: 60; width: 260px; background: #fff;
+             border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 12px 34px rgba(16,24,40,.16);
+             padding: 12px 14px; font-size: 12px; }
+ .drug-tip-name { display: block; font-size: 13px; color: #111827; margin-bottom: 6px; }
+ .drug-tip-row { margin: 3px 0; color: #1f2937; }
+ .drug-tip-lbl { color: #6b7280; font-weight: 600; margin-right: 4px; }
+ .drug-tip-val { color: #111827; font-weight: 600; }
+ /* Raw / Pooled view toggle -- shared by the trial-search and cohort tables */
+ .view-toggle-wrap { margin: 10px 0; }
+ .view-toggle { display: inline-flex; border: 1px solid #d7deea; border-radius: 7px;
+                overflow: hidden; margin-bottom: 10px; }
+ .view-toggle button { background: #fff; color: #374151; border: 0; padding: 6px 14px;
+                        font-size: 12px; font-weight: 500; cursor: pointer; }
+ .view-toggle button + button { border-left: 1px solid #d7deea; }
+ .view-toggle button.active { background: #2563eb; color: #fff; }
+ .view-panel[hidden] { display: none; }
+ .pooled-card { margin-bottom: 10px; }
+ .pooled-card h4 { margin-top: 0; }
  .cohort-insights { margin-top: 14px; }
  .cohort-next { margin-top: 12px; }
  ul.nextsteps { list-style: none; padding: 0; margin: 6px 0 0; }
@@ -1852,6 +1932,7 @@ PAGE = """<!doctype html>
     <div class="thread" id="thread">
       <div class="thread-inner" id="threadInner"></div>
     </div>
+    <div class="drug-tip" id="drugTip" hidden></div>
 
     <div class="composer">
       <div class="composer-inner">
@@ -2188,21 +2269,8 @@ async function ask(text) {
 }
 
 // Delegated clicks for the cohort table: row -> ask that trial's exec summary;
-// download button -> save the embedded CSV; Next Steps button -> ask that.
+// download button -> save the embedded Excel workbook; Next Steps button -> ask that.
 document.getElementById('threadInner').addEventListener('click', function (e) {
-  const dl = e.target.closest('.dl-btn');
-  if (dl) {
-    const csv = atob(dl.getAttribute('data-csv'));
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = dl.getAttribute('data-name') || 'cohorts.csv';
-    document.body.appendChild(a); a.click(); a.remove();
-    return;
-  }
-  // Separate button/attribute from the CSV one above -- .xlsx is binary, so it
-  // needs a byte array Blob (not a text Blob like the CSV branch), and this
-  // must never touch the existing CSV path.
   const dlx = e.target.closest('.dl-btn-xlsx');
   if (dlx) {
     const binary = atob(dlx.getAttribute('data-xlsx'));
@@ -2220,7 +2288,59 @@ document.getElementById('threadInner').addEventListener('click', function (e) {
   if (ns) { if (!busy) ask(ns.getAttribute('data-q')); return; }
   const row = e.target.closest('.cohort-row');
   if (row) { if (!busy) ask(row.getAttribute('data-q')); return; }
+  // Raw / Pooled view toggle: swap which .view-panel is visible within this
+  // block, and mark the clicked button active. Pure DOM show/hide, no re-fetch --
+  // both views were already rendered server-side in the same response.
+  const vt = e.target.closest('.view-toggle button');
+  if (vt) {
+    const wrap = vt.closest('.view-toggle-wrap');
+    const view = vt.getAttribute('data-view');
+    wrap.querySelectorAll('.view-toggle button').forEach(b => b.classList.toggle('active', b === vt));
+    wrap.querySelectorAll('.view-panel').forEach(p => { p.hidden = p.getAttribute('data-view') !== view; });
+    return;
+  }
 });
+
+// Regimen-badge hover tooltip: drug dosage/schedule/duration/treatment status/
+// route, straight from oncosuite_gold.treatment_info (see
+// tools/search_cohorts.regimen_drug_details + web_app._regimen_cell_html).
+// One shared #drugTip element, positioned in JS with position:fixed so it
+// isn't clipped by .cohort-wrap's own overflow:auto scroll box.
+function showDrugTip(badge) {
+  let data;
+  try { data = JSON.parse(badge.getAttribute('data-drug')); } catch (err) { return; }
+  const tip = document.getElementById('drugTip');
+  const fields = [
+    ['Dosage', data.dosage], ['Schedule', data.schedule], ['Duration', data.duration],
+    ['Treatment Status', data.treatment_status], ['Mode of Administration', data.mode_of_administration],
+  ];
+  let html = '<strong class="drug-tip-name">' + esc(data.name) + '</strong>';
+  fields.forEach(function (f) {
+    html += '<div class="drug-tip-row"><span class="drug-tip-lbl">' + f[0] + ':</span> '
+          + '<span class="drug-tip-val">' + esc(f[1] ? String(f[1]) : 'Not specified') + '</span></div>';
+  });
+  tip.innerHTML = html;
+  tip.hidden = false;
+  const r = badge.getBoundingClientRect();
+  const tipW = tip.offsetWidth || 260;
+  let left = Math.min(r.left, window.innerWidth - tipW - 8);
+  tip.style.left = Math.max(8, left) + 'px';
+  let top = r.top - tip.offsetHeight - 8;
+  if (top < 8) top = r.bottom + 8;
+  tip.style.top = top + 'px';
+}
+function hideDrugTip() {
+  document.getElementById('drugTip').hidden = true;
+}
+document.getElementById('threadInner').addEventListener('mouseover', function (e) {
+  const badge = e.target.closest('.drug-badge-tip');
+  if (badge) showDrugTip(badge);
+});
+document.getElementById('threadInner').addEventListener('mouseout', function (e) {
+  const badge = e.target.closest('.drug-badge-tip');
+  if (badge && !(e.relatedTarget && badge.contains(e.relatedTarget))) hideDrugTip();
+});
+document.addEventListener('scroll', hideDrugTip, true);
 
 renderSidebar();
 renderThread();
@@ -2331,7 +2451,7 @@ class Handler(BaseHTTPRequestHandler):
           event: answer  data: {"blocks": [...], "timings": {...}}
           event: error   data: {"message": "..."}
         """
-        q, err = self._read_question()
+        q, session_id, err = self._read_question_and_session()
         if err is not None or not q:
             self._send(json.dumps({"error": "bad request"}), "application/json", 400)
             return
@@ -2385,7 +2505,7 @@ class Handler(BaseHTTPRequestHandler):
                         result["payload"] = build_fast_answer(q, {}, [])
                         return
 
-                    resp = handle_turn(SESSION_ID, q,
+                    resp = handle_turn(session_id, q,
                                        on_step=lambda m: steps.put(("step", m)),
                                        skip_synthesis=True)
                     ids = _answer_trial_ids(resp)
@@ -2436,10 +2556,8 @@ class Handler(BaseHTTPRequestHandler):
         The LLM picks which charts suit the question; chart_data builds the props
         from oncosuite_gold. Charts with no backing data are dropped, so an empty
         list is a valid, common answer -- not an error."""
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-            payload = json.loads(self.rfile.read(length) or b"{}")
-        except (ValueError, TypeError):
+        payload, err = self._read_json_body()
+        if err is not None:
             self._send(json.dumps({"error": "bad json"}), "application/json", 400)
             return
 
@@ -2474,7 +2592,7 @@ class Handler(BaseHTTPRequestHandler):
         handle_turn runs in a worker thread and pushes each on_step message into a
         queue; this request thread drains the queue and flushes an SSE frame per
         step, so the user sees progress in real time on the one open connection."""
-        q, err = self._read_question()
+        q, session_id, err = self._read_question_and_session()
         if err is not None or not q:
             self._send(json.dumps({"html": '<div class="card error">Bad request.</div>'}),
                        "application/json", 400)
@@ -2523,7 +2641,7 @@ class Handler(BaseHTTPRequestHandler):
 
             def worker():
                 try:
-                    resp = handle_turn(SESSION_ID, q, on_step=lambda m: steps.put(("step", m)))
+                    resp = handle_turn(session_id, q, on_step=lambda m: steps.put(("step", m)))
                     result["html"] = render_answer(resp, q)
                     result["ids"] = _answer_trial_ids(resp)
                 except Exception as e:
@@ -2550,16 +2668,36 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass  # client navigated away mid-stream; nothing more to do
 
+    def _read_json_body(self):
+        """Parse the request body as JSON. Returns (payload_dict, error_str_or_None)
+        -- payload is {} on a parse failure, so callers can inspect it either way."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            return json.loads(self.rfile.read(length) or b"{}"), None
+        except Exception as e:
+            return {}, str(e)
+
     def _read_question(self):
         """Parse {"q": ...} (or {"question": ...}) from the request body. Returns
         (question, error_response_or_None)."""
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-            payload = json.loads(self.rfile.read(length) or b"{}")
-        except Exception as e:
-            return None, str(e)
+        payload, err = self._read_json_body()
+        if err is not None:
+            return None, err
         q = (payload.get("q") or payload.get("question") or "").strip()
         return q, None
+
+    def _read_question_and_session(self):
+        """Same as _read_question, plus the caller-supplied session_id (falling
+        back to the shared SESSION_ID). The React UI sends one session_id per
+        chat thread (frontend/src/useChats.js's per-chat id) so each sidebar
+        chat gets its own conversation/working-set memory server-side instead
+        of every chat and every browser tab sharing the single "web" bucket."""
+        payload, err = self._read_json_body()
+        if err is not None:
+            return None, None, err
+        q = (payload.get("q") or payload.get("question") or "").strip()
+        session_id = payload.get("session_id") or SESSION_ID
+        return q, session_id, None
 
     def _handle_ask_html(self):
         """Browser UI endpoint -- returns rendered HTML in {"html": ...}."""
@@ -2589,11 +2727,9 @@ class Handler(BaseHTTPRequestHandler):
         sql) WITHOUT any HTML or internal trace metadata -- suitable for other apps
         to consume. Optional session_id in the body isolates conversation memory
         per caller; defaults to the shared UI session."""
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-            payload = json.loads(self.rfile.read(length) or b"{}")
-        except Exception as e:
-            self._send(json.dumps({"error": f"bad request: {e}"}), "application/json", 400)
+        payload, err = self._read_json_body()
+        if err is not None:
+            self._send(json.dumps({"error": f"bad request: {err}"}), "application/json", 400)
             return
         q = (payload.get("q") or payload.get("question") or "").strip()
         if not q:

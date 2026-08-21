@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { BUTTON, C, CARD_TITLE, FONT, statusColor as STATUS_COLOR } from "./tokens";
 
 /* Cohort table built to the Figma spec.
@@ -21,8 +22,8 @@ const COLUMNS = [
   { key: "oncosuite_id", label: "OncoSuite ID", width: 118, kind: "id" },
   { key: "phase", label: "Phase", width: 92, filter: true },
   { key: "year", label: "Year", width: 80, filter: true },
-  { key: "indication", label: "Indication", width: 150 },
-  { key: "regimen", label: "Regimen", width: 170 },
+  { key: "indication", label: "Indication", width: 150, filter: true },
+  { key: "regimen", label: "Regimen", width: 170, kind: "regimen", filter: true },
   { key: "n", label: "N", width: 118, kind: "stacked" },
   { key: "status", label: "Status", width: 120, kind: "status", filter: true },
   { key: "os", label: "OS", width: 118, kind: "metric" },
@@ -54,6 +55,7 @@ function HeaderCell({ col, openFilter, setOpenFilter, values, selected, onToggle
           className="ct-filter-pop"
           style={{
             position: "absolute", top: 26, left: -8, zIndex: 30, minWidth: 132,
+            maxHeight: 260, overflowY: "auto",
             background: "#fff", border: `1px solid ${C.border}`, borderRadius: 6,
             boxShadow: "0 6px 20px rgba(16,24,40,.14)", padding: "6px 0",
           }}
@@ -87,9 +89,40 @@ const rowStyle = {
   font: `400 13px/18px ${FONT}`, color: C.body, cursor: "pointer",
 };
 
-function Cell({ col, row, onOpen }) {
+function Cell({ col, row, onOpen, onDrugHover, onDrugLeave }) {
   const raw = row[col.key];
   const base = { width: col.width, flexShrink: 0, font: `400 14px/18px ${FONT}`, color: C.body };
+
+  // One badge per drug in the combination. A badge whose drug has treatment
+  // detail (dashboard.py's regimenDetail, straight from
+  // oncosuite_gold.treatment_info) shows a hover tooltip with dosage/schedule/
+  // duration/treatment status/route -- see DrugTip below.
+  if (col.kind === "regimen") {
+    if (!raw || raw === "Not specified") return <div style={base}>—</div>;
+    const detail = row.regimenDetail || {};
+    const names = String(raw).split(" + ").map((s) => s.trim()).filter(Boolean);
+    return (
+      <div style={{ ...base, display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {names.map((name, i) => {
+          const d = detail[name];
+          const hasTip = !!d;
+          return (
+            <span
+              key={i}
+              onMouseEnter={hasTip ? (e) => onDrugHover(e, name, d) : undefined}
+              onMouseLeave={hasTip ? onDrugLeave : undefined}
+              style={{
+                display: "inline-block", background: "#eef2f8", color: C.body,
+                borderRadius: 5, padding: "2px 8px", font: `400 13px/18px ${FONT}`,
+              }}
+            >
+              {name}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
 
   if (col.kind === "id") {
     return (
@@ -111,9 +144,26 @@ function Cell({ col, row, onOpen }) {
     return <div style={{ ...base, color: STATUS_COLOR(raw) }}>{raw ?? "—"}</div>;
   }
 
-  // "187 (Planned) / 112 (Enrolled)" and "24.6 mo / 95% CI: ..." both render as
-  // a primary line with an italic muted sub-line.
-  if (col.kind === "stacked" || col.kind === "metric") {
+  // "187 (Planned) / 112 (Enrolled)" (that source order -- see dashboard.py
+  // _n()): Enrolled is the actionable, real-progress figure, so when both are
+  // present it's shown ABOVE Planned, bigger and in the primary dark color;
+  // Planned drops to a smaller muted sub-line. A row with only Planned (no
+  // live enrollment yet) still renders as one plain line.
+  if (col.kind === "stacked") {
+    if (raw == null || raw === "") return <div style={base}>—</div>;
+    const [planned, enrolled] = String(raw).split("\n");
+    if (!enrolled) return <div style={base}>{planned}</div>;
+    return (
+      <div style={base}>
+        <div style={{ font: `500 15px/20px ${FONT}`, color: C.headText }}>{enrolled}</div>
+        <div style={{ font: `italic 400 12px/16px ${FONT}`, color: C.muted }}>{planned}</div>
+      </div>
+    );
+  }
+
+  // "24.6 mo / 95% CI: ...": a primary value line with an italic muted
+  // confidence-interval sub-line.
+  if (col.kind === "metric") {
     if (raw == null || raw === "") return <div style={base}>—</div>;
     const [first, ...rest] = String(raw).split("\n");
     return (
@@ -129,6 +179,47 @@ function Cell({ col, row, onOpen }) {
   }
 
   return <div style={base}>{raw ?? "—"}</div>;
+}
+
+// Floating drug-detail popup for a hovered regimen badge. Rendered through a
+// portal to document.body (fixed positioning, computed from the badge's own
+// bounding rect) rather than as an absolutely-positioned child of the cell --
+// the table card below scrolls (overflowX: auto, which forces overflowY to
+// clip too), and an in-flow tooltip would be cut off at the row's edge.
+function DrugTip({ tip }) {
+  if (!tip) return null;
+  // Always all 5 rows -- a field the database has no value for still shows,
+  // as "Not specified", rather than silently disappearing from the popup.
+  const fields = [
+    ["Dosage", tip.detail.dosage],
+    ["Schedule", tip.detail.schedule],
+    ["Duration", tip.detail.duration],
+    ["Treatment Status", tip.detail.treatmentStatus],
+    ["Mode of Administration", tip.detail.modeOfAdministration],
+  ];
+
+  return createPortal(
+    <div
+      style={{
+        position: "fixed", left: tip.left, top: tip.top, bottom: tip.bottom,
+        zIndex: 1000, width: 260, background: "#fff",
+        border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8,
+        boxShadow: "0 12px 34px rgba(16,24,40,.16)", padding: "12px 14px",
+        pointerEvents: "none", fontFamily: FONT,
+      }}
+    >
+      <div style={{ font: `600 13px/18px ${FONT}`, color: C.headText, marginBottom: 6 }}>
+        {tip.name}
+      </div>
+      {fields.map(([label, value]) => (
+        <div key={label} style={{ font: `400 12px/18px ${FONT}`, margin: "3px 0" }}>
+          <span style={{ color: C.muted, fontWeight: 600 }}>{label}:</span>{" "}
+          <span style={{ color: C.headText, fontWeight: 600 }}>{value || "Not specified"}</span>
+        </div>
+      ))}
+    </div>,
+    document.body,
+  );
 }
 
 // Base64 -> Blob -> anchor-click download, same pattern App.jsx already uses
@@ -151,6 +242,30 @@ export default function CohortTable({ data = [], onOpenSummary, title, xlsxBase6
   const [openFilter, setOpenFilter] = useState(null);
   const [filters, setFilters] = useState({});
   const [page, setPage] = useState(1);
+  const [drugTip, setDrugTip] = useState(null);
+
+  // Hide the drug tooltip on any scroll (it's fixed-positioned, so it won't
+  // otherwise follow the table card's own scroll) -- capture:true so this
+  // catches scroll events from the card's inner overflow container too.
+  useEffect(() => {
+    const hide = () => setDrugTip(null);
+    document.addEventListener("scroll", hide, true);
+    return () => document.removeEventListener("scroll", hide, true);
+  }, []);
+
+  const showDrugTip = (e, name, detail) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - 268));
+    // Prefer floating above the badge (anchored by `bottom` so no height
+    // measurement is needed); falls back to below when too close to the
+    // viewport's top edge.
+    if (r.top > 160) {
+      setDrugTip({ left, bottom: window.innerHeight - r.top + 8, top: undefined, name, detail });
+    } else {
+      setDrugTip({ left, top: r.bottom + 8, bottom: undefined, name, detail });
+    }
+  };
+  const hideDrugTip = () => setDrugTip(null);
 
   const optionsFor = (key) =>
     [...new Set(data.map((r) => r[key]).filter(Boolean))].sort();
@@ -279,7 +394,10 @@ export default function CohortTable({ data = [], onOpenSummary, title, xlsxBase6
               }}
             >
               {COLUMNS.map((col) => (
-                <Cell key={col.key} col={col} row={row} onOpen={onOpenSummary} />
+                <Cell
+                  key={col.key} col={col} row={row} onOpen={onOpenSummary}
+                  onDrugHover={showDrugTip} onDrugLeave={hideDrugTip}
+                />
               ))}
             </div>
           ))}
@@ -314,6 +432,8 @@ export default function CohortTable({ data = [], onOpenSummary, title, xlsxBase6
           Next ›
         </PageBtn>
       </div>
+
+      <DrugTip tip={drugTip} />
     </div>
   );
 }

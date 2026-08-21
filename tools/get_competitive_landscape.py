@@ -11,6 +11,9 @@ Real-schema fixes vs. the original docs:
     loudly in the return payload rather than silently presented as standardized.
 """
 from db import query
+from tools.search_trials import (
+    ACADEMIC_SPONSOR_PATTERNS, _classify_sponsor, drug_match_predicate, expand_and_pattern,
+)
 from vocab import normalize_filters
 
 FIELD_GROUPS = {"condition": ["organ", "histology"]}
@@ -35,9 +38,9 @@ def _template_a_trial_level(group_by_column_sql, condition_terms, target_terms, 
             "JOIN oncosuite_gold.treatment_info tr2 ON tr2.strata_id = s2.strata_id "
             "LEFT JOIN oncosuite_gold.drug_info d2 ON d2.drug_id = tr2.drug_id "
             "WHERE a2.cohort_id = c.cohort_id "
-            "AND (d2.target ILIKE ANY(%(targets)s) OR d2.moa_category ILIKE ANY(%(targets)s)))"
+            f"AND {drug_match_predicate('d2', 'targets')})"
         )
-        params["targets"] = [f"%{tt}%" for tt in target_terms]
+        params["targets"] = expand_and_pattern(target_terms)
 
     if exclude_academic:
         where.append("(t.sponsor_name IS NOT NULL AND NOT (t.sponsor_name ILIKE ANY(%(excl_acad)s)))")
@@ -65,8 +68,8 @@ def _template_b_drug_level(condition_terms, target_terms, exclude_academic=False
         where.append("(c.organ ?| %(cond)s OR c.histology ?| %(cond)s)")
         params["cond"] = condition_terms
     if target_terms:
-        where.append("(d.target ILIKE ANY(%(targets)s) OR d.moa_category ILIKE ANY(%(targets)s))")
-        params["targets"] = [f"%{tt}%" for tt in target_terms]
+        where.append(drug_match_predicate("d", "targets"))
+        params["targets"] = expand_and_pattern(target_terms)
     if exclude_academic:
         where.append("(t.sponsor_name IS NOT NULL AND NOT (t.sponsor_name ILIKE ANY(%(excl_acad)s)))")
         params["excl_acad"] = [f"%{p}%" for p in ACADEMIC_SPONSOR_PATTERNS]
@@ -103,8 +106,8 @@ def _template_c_outcome_averages(condition_terms, target_terms, outcome_metric):
         )
         params["cond"] = condition_terms
     if target_terms:
-        where.append("(d.target ILIKE ANY(%(targets)s) OR d.moa_category ILIKE ANY(%(targets)s))")
-        params["targets"] = [f"%{tt}%" for tt in target_terms]
+        where.append(drug_match_predicate("d", "targets"))
+        params["targets"] = expand_and_pattern(target_terms)
 
     where_sql = " AND ".join(where)
     # NOTE: no unit standardization exists -- averaging raw `value` across endpoints
@@ -132,23 +135,6 @@ def _template_c_outcome_averages(condition_terms, target_terms, outcome_metric):
     return query(sql, params)
 
 
-# Academic-sponsor name patterns (mirrors search_trials.ACADEMIC_SPONSOR_PATTERNS) --
-# used to strictly exclude non-industry sponsors when the user asks to.
-ACADEMIC_SPONSOR_PATTERNS = [
-    "univers", "college", "school of medicine", "hospital", "hôpital", "klinik", "clinic",
-    "institut", "cancer center", "cancer centre", "medical center", "medical centre",
-    "health system", "foundation", "national institute", "nih", "nci ", "ministry",
-    "cooperative group", "academ", "faculty", "polyclinic", "clinique",
-]
-
-
-def _classify_sponsor(name):
-    if not name:
-        return "Unknown"
-    s = name.lower()
-    return "Academic" if any(p in s for p in ACADEMIC_SPONSOR_PATTERNS) else "Industry"
-
-
 def _sample_trial_rows(condition_terms, target_terms, exclude_academic, limit=25):
     """Return up to `limit` representative trials with the fields the synthesis layer
     needs to build rich trial tables: id, NCT id, title, sponsor, sponsor_type, phase,
@@ -166,9 +152,9 @@ def _sample_trial_rows(condition_terms, target_terms, exclude_academic, limit=25
             "JOIN oncosuite_gold.treatment_info tr2 ON tr2.strata_id = s2.strata_id "
             "LEFT JOIN oncosuite_gold.drug_info d2 ON d2.drug_id = tr2.drug_id "
             "WHERE a2.cohort_id = c.cohort_id "
-            "AND (d2.target ILIKE ANY(%(targets)s) OR d2.moa_category ILIKE ANY(%(targets)s)))"
+            f"AND {drug_match_predicate('d2', 'targets')})"
         )
-        params["targets"] = [f"%{tt}%" for tt in target_terms]
+        params["targets"] = expand_and_pattern(target_terms)
     if exclude_academic:
         where.append("(t.sponsor_name IS NOT NULL AND NOT (t.sponsor_name ILIKE ANY(%(excl_acad)s)))")
         params["excl_acad"] = [f"%{p}%" for p in ACADEMIC_SPONSOR_PATTERNS]
@@ -189,7 +175,7 @@ def _sample_trial_rows(condition_terms, target_terms, exclude_academic, limit=25
             "JOIN oncosuite_gold.treatment_info tr2 ON tr2.strata_id = s2.strata_id "
             "LEFT JOIN oncosuite_gold.drug_info d2 ON d2.drug_id = tr2.drug_id "
             "WHERE c2.oncosuite_id = t.oncosuite_id "
-            "AND (d2.target ILIKE ANY(%(targets)s) OR d2.moa_category ILIKE ANY(%(targets)s)))"
+            f"AND {drug_match_predicate('d2', 'targets')})"
         )
     if exclude_academic:
         where2.append("(t.sponsor_name IS NOT NULL AND NOT (t.sponsor_name ILIKE ANY(%(excl_acad)s)))")

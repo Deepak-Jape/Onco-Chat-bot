@@ -35,7 +35,7 @@ def _load_dotenv():
     prefixes = ("DEEPSEEK_", "ANTHROPIC_", "OLLAMA_", "OPENAI_", "PG", "DATABASE_")
     names = {"ONCOSUITE_LLM_BACKEND", "ONCOSUITE_DEEPSEEK_MODEL",
              "ONCOSUITE_CLAUDE_MODEL", "ONCOSUITE_OLLAMA_MODEL",
-             "ONCOSUITE_OLLAMA_EMBED", "ONCOSUITE_DB_URL"}
+             "ONCOSUITE_OLLAMA_EMBED", "ONCOSUITE_DB_URL", "ONCOSUITE_DSN"}
 
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     try:

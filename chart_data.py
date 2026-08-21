@@ -173,15 +173,10 @@ CHART_SPECS = {
             "the question asks about survival over time -- KM curves, median "
             "PFS/OS across a time axis, or at-risk counts per interval"
         ),
-        # oncosuite_gold has no time-series survival table: there is no source
-        # for per-timepoint probabilities or at-risk counts. Extracted and
-        # wired, but gated -- flip to True (here and in registry.js) when the
-        # data exists. Never synthesise the curve.
-        "enabled": False,
-        "disabled_reason": (
-            "No time-series survival data in oncosuite_gold (no per-timepoint "
-            "probabilities or at-risk counts)."
-        ),
+        # Backed by oncosuite_gold.results_analytics (analytics_type = 'KM
+        # Curve') -- see build_km_curve for the dedup/junk-filtering this
+        # source needs before it's shown.
+        "enabled": True,
     },
 }
 
@@ -339,16 +334,176 @@ def build_site_map(oncosuite_ids: list, question: str = "") -> dict | None:
 # --------------------------------------------------------------------------
 # KMCurve -- gated
 # --------------------------------------------------------------------------
-def build_km_curve(oncosuite_ids: list):
-    """Always None: oncosuite_gold holds no per-timepoint survival data.
+# A real KM step-curve in this table runs 200-450 points; a handful of rows
+# alongside them are junk partial extractions of the same chart (3-7 points --
+# seen directly, e.g. 3 real curves each duplicated plus four ~3-7 point
+# fragments for the same trial/endpoint). This threshold is set well below the
+# real curves and well above the junk ones so it only drops the latter.
+_MIN_KM_POINTS = 15
 
-    Kept as an explicit stub so the wiring is complete and obvious. When a
-    time-series source lands, populate `efficacy_explorer` in the shape
-    EfficacyExplorerCard already reads -- {graph_type, endpoint, disease,
-    data:{x_axis, y_axis, points:[{time, arms:{name: probability}}]}} -- and
-    flip `enabled` in CHART_SPECS and registry.js.
+
+def _km_disease_labels(oncosuite_ids):
+    """{oncosuite_id: 'Histology -- OncoSuite id'} for the Efficacy Explorer's
+    'disease' dropdown -- gives each trial's curves their own bucket (rather
+    than grouping by histology alone) so two different trials sharing a
+    histology never collide onto one dropdown entry and silently hide one
+    trial's curves (EfficacyExplorerCard shows only the first entry matching
+    a given disease+endpoint+graph_type triple)."""
+    if not oncosuite_ids:
+        return {}
+    ids = tuple(oncosuite_ids)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT oncosuite_id, histology FROM oncosuite_gold.cohort_info "
+            "WHERE oncosuite_id IN %s AND histology IS NOT NULL",
+            (ids,),
+        )
+        histology = {}
+        for oid, hist in cur.fetchall():
+            if oid not in histology and isinstance(hist, list) and hist:
+                histology[oid] = str(hist[0])
+
+    return {
+        oid: " -- ".join(filter(None, [histology.get(oid), oid]))
+        for oid in oncosuite_ids
+    }
+
+
+def build_km_curve(oncosuite_ids: list):
+    """Props for ctsearch's EfficacyExplorerCard: {"explorer": [...]}, one
+    dropdown entry (disease/endpoint/graph_type -> a KM step chart) per real
+    curve group in oncosuite_gold.results_analytics (analytics_type = 'KM
+    Curve', the only value that table carries).
+
+    Grain and cleanup, both confirmed directly against the data:
+      - A row is ONE arm's curve, not a whole chart -- the same
+        (oncosuite_id, endpoint) can have several rows, one per arm. Rows are
+        first grouped by (oncosuite_id, endpoint, the arms/risk table's exact
+        content) so unrelated sub-analyses sharing a generic endpoint label
+        (e.g. two different OS breakdowns both just called "Overall
+        survival") are never merged into one chart.
+      - Within a group, rows are exact-duplicated by the extraction pipeline
+        (identical graph_data under a different id) and also include a few
+        near-empty junk fragments (3-7 points) of the same curve alongside
+        the real one (200+ points). Deduped by exact graph_data match, then
+        anything under _MIN_KM_POINTS is dropped as junk, not shown.
+      - The shared risk table lists every arm's at-risk counts but never
+        says which row's curve belongs to which arm. When the number of
+        surviving curves matches the number of listed arms exactly, curves
+        are matched to names by ascending id (the order the rows -- and
+        presumably the source chart's own arms -- were extracted in).
+        Otherwise (counts don't line up -- seen directly for some
+        garbled/partial extractions) arms are labelled generically ("Arm
+        1", "Arm 2", ...) rather than asserting an unverified name match.
     """
-    return None
+    with get_conn() as conn, conn.cursor() as cur:
+        if oncosuite_ids:
+            cur.execute(
+                "SELECT id, oncosuite_id, endpoint_analyzed, x_axis, y_axis, "
+                "graph_data, risk_table FROM oncosuite_gold.results_analytics "
+                "WHERE oncosuite_id IN %s AND analytics_type = 'KM Curve' "
+                "ORDER BY oncosuite_id, endpoint_analyzed, id",
+                (tuple(oncosuite_ids),),
+            )
+        else:
+            cur.execute(
+                "SELECT id, oncosuite_id, endpoint_analyzed, x_axis, y_axis, "
+                "graph_data, risk_table FROM oncosuite_gold.results_analytics "
+                "WHERE analytics_type = 'KM Curve' "
+                "ORDER BY oncosuite_id, endpoint_analyzed, id"
+            )
+        rows = cur.fetchall()
+    if not rows:
+        return None
+
+    groups = {}
+    order = []
+    for _id, oid, endpoint, x_axis, y_axis, graph_data, risk_table in rows:
+        key = (oid, endpoint, json.dumps(risk_table, sort_keys=True))
+        if key not in groups:
+            groups[key] = {"oid": oid, "endpoint": endpoint, "x_axis": x_axis,
+                           "y_axis": y_axis, "risk_table": risk_table, "curves": []}
+            order.append(key)
+        groups[key]["curves"].append(graph_data or [])
+
+    disease_labels = _km_disease_labels(sorted({oid for oid, _e, _r in order}))
+
+    explorer = []
+    # EfficacyExplorerCard picks ONE entry per (disease, endpoint, graph_type)
+    # triple -- graph_type is always "KM Curve" (the only analytics_type this
+    # table carries), so two genuinely distinct sub-analyses that happen to
+    # share a disease+endpoint (e.g. two different risk-table groupings both
+    # just labelled "Overall survival" -- seen directly) would silently
+    # collide onto one dropdown selection and hide the other. Suffixing
+    # graph_type on repeat keeps every group reachable via that dropdown.
+    _disease_endpoint_seen = {}
+    for key in order:
+        g = groups[key]
+        seen, curves = [], []
+        for c in g["curves"]:
+            if c in seen:
+                continue
+            seen.append(c)
+            if len(c) >= _MIN_KM_POINTS:
+                curves.append(c)
+        if not curves:
+            continue
+
+        arm_names = [a.get("name") for a in (g["risk_table"] or {}).get("arms") or []]
+
+        def _sane(name):
+            # Real drug/arm names always carry at least one 3+ letter word
+            # ("Docetaxel", "NIVO chemo"); the extraction garbage seen
+            # directly ("I i) I I i) I I i) I I I I i)") is single letters and
+            # punctuation only, with no such run -- reject that rather than
+            # show it as if it were a real arm label.
+            return (name if name and 0 < len(str(name)) <= 80
+                    and re.search(r"[A-Za-z]{3,}", str(name)) else None)
+
+        if len(arm_names) == len(curves):
+            labels = [_sane(nm) or f"Arm {i + 1}" for i, nm in enumerate(arm_names)]
+        elif len(curves) == 1:
+            labels = [(_sane(arm_names[0]) if arm_names else None) or "Overall"]
+        else:
+            labels = [f"Arm {i + 1}" for i in range(len(curves))]
+
+        points = []
+        for label, curve in zip(labels, curves):
+            for pt in curve:
+                t, s = pt.get("time"), pt.get("survival")
+                if t is None or s is None:
+                    continue
+                points.append({"time": t, "arms": {label: s}})
+        if not points:
+            continue
+
+        # Strip a stray leading artifact number ("2 Overall survival" -> "Overall
+        # survival") but otherwise pass the endpoint label through as extracted
+        # -- some values here (A/B/C/PSF) are themselves garbled and there is no
+        # reliable way to know what they should say, so they are shown as-is
+        # rather than guessed at.
+        endpoint_label = re.sub(r"^\d+\s+", "", (g["endpoint"] or "").strip()) or "Endpoint"
+        disease_label = disease_labels.get(g["oid"]) or g["oid"]
+
+        dedupe_key = (disease_label, endpoint_label)
+        _disease_endpoint_seen[dedupe_key] = _disease_endpoint_seen.get(dedupe_key, 0) + 1
+        n = _disease_endpoint_seen[dedupe_key]
+        graph_type = "KM Curve" if n == 1 else f"KM Curve ({n})"
+
+        explorer.append({
+            "graph_type": graph_type,
+            "endpoint": endpoint_label,
+            "disease": disease_label,
+            "data": {
+                "x_axis": g["x_axis"] or {},
+                "y_axis": g["y_axis"] or {},
+                "points": points,
+            },
+        })
+
+    if not explorer:
+        return None
+    return {"explorer": explorer[:30]}
 
 
 def build_population_map(oncosuite_ids: list, question: str = ""):

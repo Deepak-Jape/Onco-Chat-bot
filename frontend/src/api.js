@@ -4,11 +4,11 @@
 /* Chart-first answer. Hits /ask/fast, which runs the query, asks the model only
    which chart fits, and returns typed blocks -- skipping the prose-writing LLM
    call that made broad questions time out. */
-export async function askFast(question, onStep) {
+export async function askFast(question, onStep, sessionId) {
   const res = await fetch("/ask/fast", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ q: question }),
+    body: JSON.stringify({ q: question, session_id: sessionId }),
   });
   if (!res.ok || !res.body) throw new Error(`Request failed (${res.status})`);
 
@@ -51,11 +51,11 @@ export async function askFast(question, onStep) {
 }
 
 /** Parse the SSE body frame-by-frame, invoking onStep for each live step. */
-export async function askStream(question, onStep) {
+export async function askStream(question, onStep, sessionId) {
   const res = await fetch("/ask/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ q: question }),
+    body: JSON.stringify({ q: question, session_id: sessionId }),
   });
   if (!res.ok || !res.body) throw new Error(`Request failed (${res.status})`);
 

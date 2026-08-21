@@ -8,6 +8,7 @@ values (roughly 8% of ORR endpoints carry a number), so expect real gaps.
 """
 
 from db import get_conn
+from tools.search_cohorts import regimen_drug_details
 
 # Cohorts are reached from drugs through
 # drug -> treatment -> stratification -> arm -> cohort -> trial.
@@ -124,7 +125,12 @@ def _indication(histology, line):
     return " ".join(parts) if parts else None
 
 
-_EFFICACY_METRICS = ("ORR", "OS", "PFS")
+# Only ORR/SAE/AE ever populate the `orr`/`sae` point fields below -- the
+# chart these feed (NewTreatment.jsx's EfficacyVsSafety, vendored/unmodified)
+# always plots those two literal fields regardless of which axis its own
+# dropdowns show, so OS/PFS could never actually be picked as a default here
+# without the chart silently rendering nothing for every point.
+_EFFICACY_METRICS = ("ORR",)
 _SAFETY_METRICS = ("SAE", "AE")
 
 
@@ -219,6 +225,13 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
         cohort_ids = tuple(r[2] for r in rows)
         trial_ids = tuple({r[0] for r in rows})
 
+        # Per-drug treatment detail for the Regimen column's hover tooltip --
+        # dosage, schedule, duration, treatment status and route, straight
+        # from oncosuite_gold.treatment_info. Same helper tools/search_cohorts
+        # uses, so a drug's name lines up exactly with the STRING_AGG'd
+        # regimen text above (both are built from the same treatment_info.drug_name).
+        drug_details = regimen_drug_details(list(cohort_ids))
+
         outcomes = {}
         cur.execute(_OUTCOME_SQL, (cohort_ids,))
         for cohort_id, metric, value in cur.fetchall():
@@ -280,6 +293,16 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
             "phase": phase,
             "indication": _indication(hist, line),
             "regimen": regimen,
+            "regimenDetail": {
+                name: {
+                    "dosage": d.get("dosage"),
+                    "schedule": d.get("schedule"),
+                    "duration": d.get("duration"),
+                    "treatmentStatus": d.get("treatment_status"),
+                    "modeOfAdministration": d.get("mode_of_administration"),
+                }
+                for name, d in (drug_details.get(cohort_id) or {}).items()
+            },
             "n": _n(planned, enrolled),
             "status": status,
             "year": _yr,
@@ -648,6 +671,19 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
     except Exception:
         pass
 
+    # KM survival curve: oncosuite_gold.results_analytics only covers a
+    # handful of trials database-wide, so this is scoped to the current
+    # modality's trial set and simply omitted (with an honest note below)
+    # when none of them happen to be among those few.
+    km = None
+    try:
+        from chart_data import build_km_curve
+        km = build_km_curve(list(trial_ids))
+    except Exception:
+        km = None
+    if km:
+        blocks.append({"type": "chart", "chart": "KMCurve", "props": km})
+
     if insights:
         blocks.append({"type": "insights", "title": "Key Learnings", "items": insights})
 
@@ -701,10 +737,12 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
             "for the same arm, and these trials have no rows in the analytics "
             "efficacy/safety dataset."
         )
-    missing.append(
-        "KM curve is not shown: the database holds no per-timepoint survival "
-        "probabilities or at-risk counts."
-    )
+    if not km:
+        missing.append(
+            "KM curve is not shown: none of these trials are among the small "
+            "set oncosuite_gold.results_analytics currently covers with "
+            "per-timepoint survival probabilities or at-risk counts."
+        )
     if missing:
         blocks.append({"type": "note", "items": missing})
 

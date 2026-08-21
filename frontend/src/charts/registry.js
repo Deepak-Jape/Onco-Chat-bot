@@ -289,19 +289,18 @@ export const REGISTRY = {
   },
 
   KMCurve: {
+    // EfficacyExplorerCard takes a single `explorer` prop (array of
+    // {graph_type, endpoint, disease, data:{x_axis, y_axis, points}}) --
+    // ChartBlock spreads `props` straight onto the component, so
+    // chart_data.build_km_curve's returned {"explorer": [...]} lands as
+    // exactly that prop. Backed by oncosuite_gold.results_analytics.
     component: lazy(() => import("@ct/pages/trialsHeader/trials/EfficacyExplorerCard")),
     label: "Kaplan-Meier survival curve",
     useWhen:
       "the question asks about survival over time -- KM curves, median PFS/OS " +
       "over a time axis, or at-risk counts across intervals",
-    requires: ["efficacy_explorer"],
-    // oncosuite_gold has no time-series survival table: there is no source for
-    // per-timepoint probabilities or at-risk counts. The component is ready --
-    // flip this to true when that data exists. Never fabricate the series.
-    enabled: false,
-    disabledReason:
-      "No time-series survival data in oncosuite_gold (no per-timepoint " +
-      "probabilities or at-risk counts).",
+    requires: ["explorer"],
+    enabled: true,
   },
 };
 

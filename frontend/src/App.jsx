@@ -390,7 +390,7 @@ function Answer({ blocks, onOpenSummary, onServerAnswerClick }) {
 
 export default function App() {
   const {
-    chats, activeId, active,
+    chats, activeId, active, activeIdRef,
     setActiveId, newChat, addMessage, renameChat, togglePin, deleteChat,
   } = useChats();
 
@@ -439,6 +439,12 @@ export default function App() {
       setBusy(true);
       setSteps([]);
       addMessage({ role: "user", q });
+      // addMessage creates the chat (and its id) synchronously on the first
+      // message of a new thread -- activeIdRef reflects that immediately, so
+      // this request tags the backend session with the SAME id the sidebar
+      // shows, keeping each chat's server-side memory (router.py's
+      // conversation history + working set) isolated from every other chat.
+      const sessionId = activeIdRef.current;
       scrollDown();
 
       const liveSteps = [];
@@ -447,7 +453,7 @@ export default function App() {
           liveSteps.push(s);
           setSteps((prev) => [...prev, s]);
           scrollDown();
-        });
+        }, sessionId);
         addMessage({ role: "bot", blocks: result.blocks, steps: liveSteps });
       } catch (e) {
         addMessage({ role: "bot", error: String(e), steps: liveSteps });

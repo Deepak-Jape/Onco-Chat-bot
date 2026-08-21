@@ -1,18 +1,49 @@
 """
 Piece 6 -- session / context memory for follow-ups.
-Implemented here as an in-process dict store with the exact same interface a
-Redis-backed store would have (get/set with a TTL) -- swap SessionStore's
-internals for real Redis calls in production without touching call sites.
-"""
-import time
 
+Backed by oncosuite_gold.chat_working_set (Postgres) rather than a
+process-local dict, so a follow-up ("compare arm A vs B") still resolves
+correctly after a server restart/redeploy, and works the same way if the app
+ever runs more than one worker process. The public get/set/update_after_tool_call
+interface is unchanged, so call sites don't need to know the store moved.
+
+TTL is enforced in the SELECT's WHERE clause -- a row older than ttl_seconds is
+simply not returned, matching the old in-memory "expire on read" behavior
+without needing a background sweep.
+"""
+import threading
+
+from psycopg2.extras import Json
+
+from db import execute, query
+
+TABLE = "oncosuite_gold.chat_working_set"
 DEFAULT_TTL_SECONDS = 45 * 60  # 45 min, per the docs' 30-60 min product-decision default
 MAX_HISTORY = 10
+
+_ensure_lock = threading.Lock()
+_ensured = False
+
+
+def _ensure_table():
+    global _ensured
+    if _ensured:
+        return
+    with _ensure_lock:
+        if _ensured:
+            return
+        execute(
+            f"CREATE TABLE IF NOT EXISTS {TABLE} ("
+            "  session_id text PRIMARY KEY,"
+            "  working_set jsonb NOT NULL,"
+            "  updated_at timestamptz NOT NULL DEFAULT now()"
+            ")"
+        )
+        _ensured = True
 
 
 class SessionStore:
     def __init__(self, ttl_seconds=DEFAULT_TTL_SECONDS):
-        self._store = {}
         self.ttl_seconds = ttl_seconds
 
     def _default_working_set(self, session_id):
@@ -22,22 +53,28 @@ class SessionStore:
             "last_trials": [],
             "last_arms": [],
             "last_filters": {},
-            "updated_at": time.time(),
         }
 
     def get(self, session_id):
-        entry = self._store.get(session_id)
-        if entry is None:
+        _ensure_table()
+        rows = query(
+            f"SELECT working_set FROM {TABLE} WHERE session_id = %(sid)s "
+            f"AND updated_at > now() - make_interval(secs => %(ttl)s)",
+            {"sid": session_id, "ttl": self.ttl_seconds},
+        )
+        if not rows:
             return self._default_working_set(session_id)
-        working_set, expires_at = entry
-        if time.time() > expires_at:
-            del self._store[session_id]
-            return self._default_working_set(session_id)
-        return working_set
+        return rows[0]["working_set"]
 
     def set(self, session_id, working_set):
-        working_set["updated_at"] = time.time()
-        self._store[session_id] = (working_set, time.time() + self.ttl_seconds)
+        _ensure_table()
+        execute(
+            f"INSERT INTO {TABLE} (session_id, working_set, updated_at) "
+            f"VALUES (%(sid)s, %(ws)s, now()) "
+            f"ON CONFLICT (session_id) DO UPDATE "
+            f"SET working_set = excluded.working_set, updated_at = excluded.updated_at",
+            {"sid": session_id, "ws": Json(working_set)},
+        )
 
     def update_after_tool_call(self, session_id, tool_name, tool_result):
         ws = self.get(session_id)

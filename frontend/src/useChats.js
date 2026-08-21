@@ -90,7 +90,7 @@ export default function useChats() {
   );
 
   return {
-    chats, activeId, active,
+    chats, activeId, active, activeIdRef,
     setActiveId, newChat, addMessage, renameChat, togglePin, deleteChat,
   };
 }

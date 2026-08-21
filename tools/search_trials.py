@@ -24,7 +24,8 @@ Nothing is silently dropped: a term that matches zero rows in every target
 column for its group is reported back in unmatched_terms so the router can ask
 the user to disambiguate rather than returning a wrong zero-result answer.
 """
-from db import query
+from column_catalog import TRIAL_COLUMNS, extra_keys_with, resolve_keys
+from db import query, resolve_nct_ids
 
 # Trigram threshold for fuzzy matching against unnested values. Kept modest so
 # multi-word user input ("lung cancer") still clears it against a single-word
@@ -95,6 +96,30 @@ def _expand_synonyms(term):
         if x.lower() not in seen:
             seen.add(x.lower()); uniq.append(x)
     return uniq
+
+
+def expand_and_pattern(terms):
+    """Expand each term through _expand_synonyms, then wrap every expansion as
+    an ILIKE '%...%' pattern. Shared by search_trials/search_cohorts' drug
+    filter, which both expand-then-pattern the same way."""
+    expanded = []
+    for t in terms:
+        expanded.extend(_expand_synonyms(t))
+    return [f"%{e}%" for e in expanded]
+
+
+# The drug-match columns widened past name/target so a class/modality query
+# (e.g. "ADC", "bispecific") resolves via modality/class/moa_category too, not
+# just literal name hits. Shared by search_trials/search_cohorts' drug EXISTS
+# subqueries -- the join chain around it differs per caller (trials anchor on
+# oncosuite_id, cohorts on cohort_id) so only the predicate itself is shared.
+DRUG_MATCH_COLUMNS = ["name", "target", "brand_name", "modality", "class",
+                      "moa_category", "mechanism_of_action"]
+
+
+def drug_match_predicate(alias, param):
+    ors = " OR ".join(f"{alias}.{c} ILIKE ANY(%({param})s)" for c in DRUG_MATCH_COLUMNS)
+    return f"({ors})"
 
 
 def _term_matches_any_column(term, columns):
@@ -175,9 +200,20 @@ def _academic_exclusion_sql(param_key):
     return f"(t.sponsor_name ILIKE ANY(%({param_key})s))"
 
 
+def _classify_sponsor(name):
+    """Same heuristic as get_competitive_landscape.py's _classify_sponsor -- there is
+    no authoritative sponsor-type column, so this backs the opt-in "sponsor_type"
+    column in column_catalog.py."""
+    if not name:
+        return "Unknown"
+    s = name.lower()
+    return "Academic" if any(p in s for p in ACADEMIC_SPONSOR_PATTERNS) else "Industry"
+
+
 def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_therapy=None,
                    prior_therapy=None, drug_name_or_target=None, phase=None, study_status=None,
-                   sponsor=None, exclude_sponsor_type=None, reported_outcomes=None, limit=50, offset=0):
+                   sponsor=None, exclude_sponsor_type=None, reported_outcomes=None, limit=50,
+                   offset=0, columns=None):
     """
     exclude_sponsor_type: "academic" to strictly filter OUT university/hospital/institute/
     government sponsors (for queries like "not interested in academia"). Classification is
@@ -188,7 +224,15 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
     value for ANY of these metrics in results_outcomes_basic_info. Without this,
     "trials that have OS/ORR/PFS reported" has no way to be expressed and silently
     gets dropped, returning the same unfiltered set as a bare condition search.
+
+    columns: extra column_catalog.TRIAL_COLUMNS keys to include ON TOP OF the
+    default row shape (see resolve_keys) -- e.g. ["lead_organization", "sponsor_type"]
+    when the user asked for more detail than the baseline columns. None/[] reproduces
+    exactly today's row shape.
     """
+    active_keys = resolve_keys(TRIAL_COLUMNS, columns)
+    extra_trial_cols = extra_keys_with(TRIAL_COLUMNS, active_keys, "trial_col")
+    want_sponsor_type = "sponsor_type" in active_keys
     raw_filters = {
         "condition": condition,
         "biomarkers": biomarkers,
@@ -252,7 +296,6 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
         )
         params["excl_acad"] = [f"%{p}%" for p in ACADEMIC_SPONSOR_PATTERNS]
         filters_extracted = True
-        filters_extracted = True
     if drug_name_or_target:
         # Match a drug by NAME/target OR by CLASS/modality. A user term like "ADC"
         # is recorded in the data as a modality ("...conjugate"), not a drug name,
@@ -260,9 +303,6 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
         # level columns (modality, class, moa_category, mechanism_of_action) in
         # addition to name/target/brand. Without this, "ADCs" matched only ~4
         # trials (name contains "ADC") instead of ~72 (modality is a conjugate).
-        expanded = []
-        for d in drug_name_or_target:
-            expanded.extend(_expand_synonyms(d))
         where_clauses.append(
             "EXISTS (SELECT 1 FROM oncosuite_gold.arms_info a2 "
             "JOIN oncosuite_gold.stratification_info s2 ON s2.arm_id = a2.arm_id "
@@ -270,12 +310,9 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
             "LEFT JOIN oncosuite_gold.drug_info d2 ON d2.drug_id = tr2.drug_id "
             "JOIN oncosuite_gold.cohort_info c2 ON c2.cohort_id = a2.cohort_id "
             "WHERE c2.oncosuite_id = t.oncosuite_id "
-            "AND (d2.name ILIKE ANY(%(drug)s) OR d2.target ILIKE ANY(%(drug)s) "
-            "OR d2.brand_name ILIKE ANY(%(drug)s) OR d2.modality ILIKE ANY(%(drug)s) "
-            "OR d2.class ILIKE ANY(%(drug)s) OR d2.moa_category ILIKE ANY(%(drug)s) "
-            "OR d2.mechanism_of_action ILIKE ANY(%(drug)s)))"
+            f"AND {drug_match_predicate('d2', 'drug')})"
         )
-        params["drug"] = [f"%{d}%" for d in expanded]
+        params["drug"] = expand_and_pattern(drug_name_or_target)
         filters_extracted = True
     if reported_outcomes:
         where_clauses.append(
@@ -292,9 +329,12 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
 
     where_sql = " AND ".join(where_clauses)
 
+    extra_select = "".join(
+        f", t.{TRIAL_COLUMNS[k]['trial_col']}" for k in extra_trial_cols
+    )
     sql = f"""
         SELECT DISTINCT t.oncosuite_id, t.official_title, t.trial_phase, t.study_status,
-               t.sponsor_name, t.enrollment_count, t.start_date
+               t.sponsor_name, t.enrollment_count, t.start_date{extra_select}
         FROM oncosuite_gold.trial_info t
         WHERE {where_sql}
         ORDER BY t.start_date DESC NULLS LAST
@@ -310,14 +350,7 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
     total = query(count_sql, params)[0]["total"]
 
     ids = [r["oncosuite_id"] for r in rows]
-    nct_map = {}
-    if ids:
-        nct_rows = query(
-            "SELECT oncosuite_id, source_unique_id FROM oncosuite_gold.source_mapping "
-            "WHERE oncosuite_id = ANY(%(ids)s) AND source_name = 'clinicaltrials.gov'",
-            {"ids": ids},
-        )
-        nct_map = {r["oncosuite_id"]: r["source_unique_id"] for r in nct_rows}
+    nct_map = resolve_nct_ids(ids)
 
     # When reported_outcomes filtered the search, show WHICH of those metrics
     # each trial actually has -- the filter alone doesn't say why a given row
@@ -347,6 +380,17 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
             for oid, metrics in found_by_id.items()
         }
 
+    def _extra_fields(r):
+        out = {}
+        for k in extra_trial_cols:
+            v = r.get(TRIAL_COLUMNS[k]["trial_col"])
+            # date/datetime values (e.g. primary_completion_date) -> ISO string,
+            # matching how start_date is already stringified above.
+            out[k] = str(v) if hasattr(v, "isoformat") else v
+        if want_sponsor_type:
+            out["sponsor_type"] = _classify_sponsor(r["sponsor_name"])
+        return out
+
     results = [
         {
             "oncosuite_id": r["oncosuite_id"],
@@ -359,12 +403,14 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
             "start_date": str(r["start_date"]) if r["start_date"] else None,
             **({"reported_outcomes": reported_map.get(r["oncosuite_id"], "")}
                if reported_outcomes else {}),
+            **_extra_fields(r),
         }
         for r in rows
     ]
 
     return {
         "results": results,
+        "columns": active_keys + (["reported_outcomes"] if reported_outcomes else []),
         "total_matches": total,
         "returned": len(results),
         "unmatched_terms": unmatched_terms,
@@ -380,5 +426,6 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
             "study_status": study_status, "sponsor": sponsor,
             "exclude_sponsor_type": exclude_sponsor_type,
             "reported_outcomes": reported_outcomes,
+            "columns": columns,
         },
     }

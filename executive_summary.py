@@ -67,35 +67,59 @@ def build_executive_summary(oncosuite_id: str):
             (tid,),
         )
         row = cur.fetchone()
-        if not row:
-            return None
-        data = _load(row[0])
-        if not isinstance(data, dict):
-            return None
+    # Cursor/connection released above -- build_km_curve below needs the same
+    # shared per-thread connection (db.get_conn()) and psycopg2 refuses to
+    # re-enter it recursively while this `with` block still holds it open.
+    if not row:
+        return None
+    data = _load(row[0])
+    if not isinstance(data, dict):
+        return None
 
-        # site_locations / trial_contacts are stored under those names; the
-        # drawer reads sites_locations. Alias rather than rename so either
-        # spelling in the stored payload keeps working.
-        if "sites_locations" not in data and "site_locations" in data:
-            data["sites_locations"] = data["site_locations"]
-        if "contacts" not in data and "trial_contacts" in data:
-            data["contacts"] = data["trial_contacts"]
+    # site_locations / trial_contacts are stored under those names; the
+    # drawer reads sites_locations. Alias rather than rename so either
+    # spelling in the stored payload keeps working.
+    if "sites_locations" not in data and "site_locations" in data:
+        data["sites_locations"] = data["site_locations"]
+    if "contacts" not in data and "trial_contacts" in data:
+        data["contacts"] = data["trial_contacts"]
 
-        top = data.setdefault("top_info", {}).setdefault("value", {})
-        if not (top.get("nctid") or {}).get("value"):
-            top["nctid"] = {"value": tid}
-        if not (top.get("registry_source") or {}).get("value"):
-            top["registry_source"] = {"value": tid}
+    top = data.setdefault("top_info", {}).setdefault("value", {})
+    if not (top.get("nctid") or {}).get("value"):
+        top["nctid"] = {"value": tid}
+    if not (top.get("registry_source") or {}).get("value"):
+        top["registry_source"] = {"value": tid}
 
-        # StudyDetailsTab prefers the active phase but falls back to a flat
-        # top-level study_details / endpoints. Mirror the first phase there so a
-        # phase-selection mismatch cannot blank the cards.
-        phases = data.get("phases") or []
-        if phases:
-            first = (phases[0].get("value") or [{}])[0]
-            data.setdefault("study_details", first.get("study_details") or {})
-            endpoint = phases[0].get("endpoint")
-            if endpoint and "endpoints" not in data:
-                data["endpoints"] = endpoint
+    # StudyDetailsTab prefers the active phase but falls back to a flat
+    # top-level study_details / endpoints. Mirror the first phase there so a
+    # phase-selection mismatch cannot blank the cards.
+    phases = data.get("phases") or []
+    if phases:
+        first = (phases[0].get("value") or [{}])[0]
+        data.setdefault("study_details", first.get("study_details") or {})
+        endpoint = phases[0].get("endpoint")
+        if endpoint and "endpoints" not in data:
+            data["endpoints"] = endpoint
 
-        return data
+    # KM curves: ResultsTab reads result_section.result_section_analysis.
+    # efficacy_explorer[] straight off whichever node ends up as its `data`
+    # prop -- sometimes the per-phase node, sometimes this top-level object
+    # (see ResultsTab.jsx's drawerData resolution) -- so the same entries are
+    # injected into both rather than guessing which one the caller will use.
+    # Only oncosuite_gold.results_analytics' small set of trials ever produce
+    # anything here; every other trial's payload is returned unchanged.
+    try:
+        from chart_data import build_km_curve
+        km = build_km_curve([tid])
+    except Exception:
+        km = None
+    if km and km.get("explorer"):
+        data.setdefault("result_section", {}) \
+            .setdefault("result_section_analysis", {})["efficacy_explorer"] = km["explorer"]
+        for phase in phases:
+            for v in (phase.get("value") or []):
+                if isinstance(v, dict):
+                    v.setdefault("result_section", {}) \
+                        .setdefault("result_section_analysis", {})["efficacy_explorer"] = km["explorer"]
+
+    return data

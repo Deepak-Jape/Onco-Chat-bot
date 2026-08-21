@@ -486,17 +486,13 @@ const ResultsTab = ({ data, isResultDisabled, oncosuite_id }) => {
   const usesCustomResultTables =
     CUSTOM_RESULT_ONCOSUITE_IDS.includes(currentOncosuiteId);
 
-  // Results › Analytics is only built out for this one OncoSuite study, whose
-  // payload carries result_section_analysis.efficacy_explorer[] (KM curves).
-  // Every other study keeps the tab disabled until its data lands.
-  // Callers pass the id either as an explicit prop (ListTabContainer, which
-  // hands `data` the phase node that has no top_info) or inside data.top_info.
-  const ANALYTICS_ONCOSUITE_IDS = ["wD7-VqO-nZf"];
-  const analyticsOncosuiteId = oncosuite_id ?? currentOncosuiteId;
+  // Results › Analytics reads whatever KM-curve data this study's own payload
+  // actually carries at result_section_analysis.efficacy_explorer[] -- the
+  // tab is data-driven (hasAnalytics below), not tied to one hardcoded study
+  // id, so it lights up automatically for every trial the backend has real
+  // curve data for.
   const efficacyExplorer =
-    ANALYTICS_ONCOSUITE_IDS.includes(analyticsOncosuiteId)
-      ? data?.result_section?.result_section_analysis?.efficacy_explorer
-      : null;
+    data?.result_section?.result_section_analysis?.efficacy_explorer;
   const hasAnalytics =
     Array.isArray(efficacyExplorer) && efficacyExplorer.length > 0;
 

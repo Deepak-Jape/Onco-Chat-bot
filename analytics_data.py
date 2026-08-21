@@ -90,13 +90,17 @@ def _population(v):
 def _first(v):
     """First value of a list-ish column.
 
-    These views store such columns either as a real jsonb array or as text like
-    "['Phase 2']", so both shapes are handled.
+    These views store such columns as a real jsonb array, as jsonb-array text
+    like "['Phase 2']", OR (efficacyvssafety_table's line_of_therapy/cancer_stage/
+    phase/country, native postgres ARRAY columns of an unregistered element
+    type) as postgres's own array literal text, e.g. '{"Phase 2"}' -- psycopg2
+    has no typecaster for that element type, so it comes back as the raw
+    driver text rather than a Python list. All three shapes are handled here.
     """
     if isinstance(v, list):
         return str(v[0]).strip() if v else None
     s = str(v or "").strip()
-    if s.startswith("[") and s.endswith("]"):
+    if (s.startswith("[") and s.endswith("]")) or (s.startswith("{") and s.endswith("}")):
         s = s[1:-1]
     return s.replace('"', "").replace("'", "").split(",")[0].strip() or None
 
@@ -104,6 +108,26 @@ def _first(v):
 # --------------------------------------------------------------------------
 # Efficacy vs Safety
 # --------------------------------------------------------------------------
+# Safety-side metrics the chart's `sae` point field (and its y-axis option
+# list) may draw from, in priority order. Kept as ONE shared list so the
+# y-axis options offered and the field actually populated below never drift
+# apart -- whichever of these wins as the default is guaranteed to be the one
+# reflected in `sae`, so "N plotted" never claims points the chart then
+# renders as empty (see NewTreatment.jsx's EfficacyVsSafety, vendored/
+# unmodified, which always plots the literal `orr`/`sae` fields regardless of
+# its own dropdowns). All five are genuine safety/toxicity measures -- DLT for
+# dose-escalation designs, TEAE more broadly -- just labelled differently by
+# trial design; excluded on purpose are this table's combined/ambiguous
+# labels ("TEAES, TESAES", "OR, CR, PR", ...) from its extraction pipeline,
+# which never match any single metric and are correctly left out rather than
+# guessed at.
+_SAFETY_METRICS = ("SAE", "AE", "AES", "DLT", "TEAE")
+
+
+def _safety_value(metrics):
+    return next((metrics[m] for m in _SAFETY_METRICS if m in metrics), None)
+
+
 # The efficacyvssafety_* family is the same measurements grouped a different
 # way -- one table per "Color by" dimension. Each is keyed by oncosuite_id and
 # carries endpoint_abbr / endpoint_value plus its own grouping column, so the
@@ -348,8 +372,9 @@ def build_efficacy_safety_rows(oncosuite_ids=None, limit=1000):
     sql = f"""
         SELECT x.arm_id, x.oncosuite_id, x.arm_type, x.treatment_strategy,
                x.endpoint_category, x.endpoint_abbreviation, x.endpoint_value,
-               x.phase::text, x.year
+               f.phase::text, x.year
           FROM analytics.efficacy_vs_safety x
+          LEFT JOIN analytics.filters_table f ON f.arm_id = x.arm_id
           {clause}
          ORDER BY x.arm_id, x.endpoint_abbreviation
          LIMIT %s
@@ -414,11 +439,12 @@ def build_efficacy_safety_wide(oncosuite_ids=None, limit=5000):
                MIN(x.oncosuite_id)        AS oncosuite_id,
                MIN(x.treatment_strategy)  AS strategy,
                MIN(x.arm_type)            AS arm_type,
-               MIN(x.phase::text)         AS phase,
+               MIN(f.phase::text)         AS phase,
                MIN(x.year)                AS year,
                UPPER(x.endpoint_abbreviation) AS metric,
                MAX(x.endpoint_value)      AS value
           FROM analytics.efficacy_vs_safety x
+          LEFT JOIN analytics.filters_table f ON f.arm_id = x.arm_id
           {clause}
          GROUP BY x.arm_id, UPPER(x.endpoint_abbreviation)
          LIMIT %s
@@ -447,7 +473,7 @@ def build_efficacy_safety_wide(oncosuite_ids=None, limit=5000):
             "name": str(arm_id),
             "metrics": info["metrics"],
             "orr": info["metrics"].get("ORR"),
-            "sae": info["metrics"].get("AE") or info["metrics"].get("SAE"),
+            "sae": _safety_value(info["metrics"]),
             "n": 1,
             "strategy": info["strategy"],
             "biomarker": info["phase"],
@@ -470,8 +496,15 @@ def build_efficacy_safety_wide(oncosuite_ids=None, limit=5000):
                    if p["metrics"].get(x) is not None
                    and p["metrics"].get(y) is not None)
 
-    x_all = ["ORR", "DCR", "DOR", "DCB", "PCR", "TTR", "SD", "PFS", "OS"]
-    y_all = ["AE", "SAE", "AES", "DLT", "TEAE"]
+    # The chart component this feeds (NewTreatment.jsx's EfficacyVsSafety,
+    # vendored/unmodified) always plots the literal `orr`/`sae` point fields --
+    # its axis dropdowns are cosmetic and never re-key the plotted data. Only
+    # ORR populates `orr` and only SAE/AE/AES populate `sae` (see the point
+    # construction above), so those are the only metrics that can ever be
+    # offered as a default: picking e.g. DLT here would report "N plotted"
+    # while the chart actually renders nothing for any of them.
+    x_all = ["ORR"]
+    y_all = list(_SAFETY_METRICS)
     x_options = [m for m in x_all if _have(m) >= 3]
     y_options = [m for m in y_all if _have(m) >= 3]
     if not x_options or not y_options:
@@ -549,7 +582,7 @@ def build_efficacy_safety_by_dimension(dimension="backbone", oncosuite_ids=None,
             "name": f"{oid} · {grp}",
             "metrics": info["metrics"],
             "orr": info["metrics"].get("ORR"),
-            "sae": info["metrics"].get("SAE") or info["metrics"].get("AE"),
+            "sae": _safety_value(info["metrics"]),
             "n": int(info["n"] or 1) or 1,
             # Every grouping key is mirrored onto `strategy` so the chart's
             # default "Color by" field groups correctly whichever table is used.
@@ -576,8 +609,13 @@ def build_efficacy_safety_by_dimension(dimension="backbone", oncosuite_ids=None,
     # Requiring a metric to PAIR with the other axis hid ORR-only units, which
     # are still worth plotting -- the chart shows them against whichever axis
     # they do have.
-    x_all = ["ORR", "DCR", "DOR", "DCB", "PCR", "TTR", "SD", "PFS", "OS"]
-    y_all = ["SAE", "AE", "AES", "DLT", "TEAE"]
+    # Restricted to what the chart's fixed `orr`/`sae` point fields actually
+    # carry (see the point construction above) -- NewTreatment.jsx's
+    # EfficacyVsSafety (vendored, unmodified) always plots those two literal
+    # fields, so a default of e.g. DLT would report points as "plotted" while
+    # rendering nothing.
+    x_all = ["ORR"]
+    y_all = list(_SAFETY_METRICS)
     x_options = [x for x in x_all if _have(x) >= 3]
     y_options = [y for y in y_all if _have(y) >= 3]
     if not x_options or not y_options:
@@ -635,11 +673,13 @@ def build_efficacy_safety(oncosuite_ids=None, limit=400):
                MIN(e.oncosuite_id) AS oncosuite_id,
                MIN(e.treatment_strategy) AS strategy,
                MIN(e.arm_type) AS arm_type,
-               -- phase is jsonb in these views, so cast before aggregating.
-               MIN(e.phase::text) AS phase,
+               -- phase isn't on efficacy_vs_safety itself; filters_table carries
+               -- it (jsonb array) keyed by the same arm_id.
+               MIN(f.phase::text) AS phase,
                UPPER(e.endpoint_abbreviation) AS metric,
                MAX(e.endpoint_value) AS value
           FROM analytics.efficacy_vs_safety e
+          LEFT JOIN analytics.filters_table f ON f.arm_id = e.arm_id
           {clause}
          GROUP BY e.arm_id, UPPER(e.endpoint_abbreviation)
          LIMIT %s
@@ -676,19 +716,17 @@ def build_efficacy_safety(oncosuite_ids=None, limit=400):
             # biomarker_dimension_over_time and treatment_dimension_over_time
             # each hold several dimensions in one table, keyed by
             # dimension_type: biomarker/target and drug/moa/drug_class/backbone.
+            # arm_id is a plain int column here (one row per arm), not a jsonb
+            # array, so this is a direct membership filter, no unnesting.
             for table in ("biomarker_dimension_over_time",
                           "treatment_dimension_over_time"):
                 cur.execute(
                     f"""
-                    SELECT d.dimension_type,
-                           (a.value)::int AS arm_id,
-                           MIN(d.dimension_value) AS v
+                    SELECT d.dimension_type, d.arm_id, MIN(d.dimension_value) AS v
                       FROM analytics.{table} d
-                      CROSS JOIN LATERAL
-                           jsonb_array_elements_text(d.arm_ids) AS a(value)
                      WHERE d.dimension_value IS NOT NULL
                        AND d.dimension_type IS NOT NULL
-                       AND (a.value)::int = ANY(%s)
+                       AND d.arm_id = ANY(%s)
                      GROUP BY 1, 2
                     """,
                     (arm_ids,),
@@ -698,11 +736,10 @@ def build_efficacy_safety(oncosuite_ids=None, limit=400):
 
             cur.execute(
                 """
-                SELECT (a.value)::int AS arm_id, MIN(m.mode_of_admin) AS v
+                SELECT m.arm_id, MIN(m.mode_of_admin) AS v
                   FROM analytics.mode_of_administration_over_time m
-                  CROSS JOIN LATERAL jsonb_array_elements_text(m.arm_ids) AS a(value)
                  WHERE m.mode_of_admin IS NOT NULL
-                   AND (a.value)::int = ANY(%s)
+                   AND m.arm_id = ANY(%s)
                  GROUP BY 1
                 """,
                 (arm_ids,),
@@ -721,7 +758,7 @@ def build_efficacy_safety(oncosuite_ids=None, limit=400):
             # endpoint this arm has so the axis dropdowns can re-plot without a
             # round-trip.
             "orr": metrics.get("ORR"),
-            "sae": metrics.get("SAE") or metrics.get("AE") or metrics.get("AES"),
+            "sae": _safety_value(metrics),
             "metrics": metrics,
             "n": 1,
             "strategy": meta["strategy"] or "Unknown",
@@ -750,8 +787,11 @@ def build_efficacy_safety(oncosuite_ids=None, limit=400):
                 out.append(m)
         return out
 
-    x_options = _available(["ORR", "DCR", "DOR", "TTR", "SD", "PFS", "OS"])
-    y_options = _available(["SAE", "AE", "AES", "DLT", "TEAE"])
+    # Restricted to ORR/SAE-family: the chart's `orr`/`sae` point fields (set
+    # above) are the only ones NewTreatment.jsx's EfficacyVsSafety (vendored,
+    # unmodified) ever plots, regardless of which metric is "selected" here.
+    x_options = _available(["ORR"])
+    y_options = _available(_SAFETY_METRICS)
     if not x_options or not y_options:
         return None
 
@@ -1058,7 +1098,7 @@ def build_efficacy_safety_extracted(oncosuite_ids=None, limit=1000):
             "name": info["arm_name"] or info["oncosuite_id"],
             "metrics": info["metrics"],
             "orr": info["metrics"].get("ORR"),
-            "sae": info["metrics"].get("SAE") or info["metrics"].get("AE"),
+            "sae": _safety_value(info["metrics"]),
             "n": 1,
             "strategy": info["strategy"],
             "biomarker": info["phase"],
@@ -1080,8 +1120,14 @@ def build_efficacy_safety_extracted(oncosuite_ids=None, limit=1000):
         return sum(1 for p in points
                    if p["metrics"].get(x) is not None and p["metrics"].get(y) is not None)
 
-    x_options = [m for m in _EXTRACTED_X if _have(m) >= 3]
-    y_options = [m for m in _EXTRACTED_Y if _have(m) >= 3]
+    # _EXTRACTED_X/_EXTRACTED_Y widen the SQL fetch to every metric worth
+    # carrying in `metrics` for the tooltip, but the chart itself (NewTreatment
+    # .jsx's EfficacyVsSafety, vendored/unmodified) only ever plots the literal
+    # `orr`/`sae` point fields set above -- so only ORR/SAE-family may be
+    # offered as the default axis, or "N plotted" would claim points that
+    # never actually render (e.g. DLT, which has no `sae`-field mapping).
+    x_options = [m for m in _EXTRACTED_X if m == "ORR" and _have(m) >= 3]
+    y_options = [m for m in _EXTRACTED_Y if m in _SAFETY_METRICS and _have(m) >= 3]
     if not x_options or not y_options:
         return None
 
