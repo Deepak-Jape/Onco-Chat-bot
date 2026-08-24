@@ -407,7 +407,7 @@ def _synthesize_trial_detail(tr: dict, citations: list) -> dict:
             insights.append(f"- {name}: HR {hr.get('hr_value_and_range')} ({hr.get('hr_ci')}), "
                             f"p={hr.get('p_value')}")
         else:
-            insights.append(f"- {name} reported — see Endpoints &amp; Outcomes below.")
+            insights.append(f"- {name} reported — see Endpoints & Outcomes below.")
     ae_total = sum(len(a.get("adverse_events") or []) for c in cohorts for a in c.get("arms", []))
     if ae_total:
         insights.append(f"- {ae_total} adverse-event categories recorded across all arms.")
