@@ -140,6 +140,7 @@ def synthesize_cohorts(user_message: str, tr: dict) -> dict:
         "text": lead,                 # plain fallback if HTML renderer isn't used
         "lead": lead,
         "rows": results,              # renderer builds the interactive table from these
+        "columns": tr.get("columns"), # column_catalog.COHORT_COLUMNS keys to render
         "insights": insights,
         "next_steps": [
             "Do you want me to run analytics on these to find actionable patterns?",
@@ -162,6 +163,34 @@ def _format_history(history) -> str:
             content = content[:800] + " ...[truncated]"
         lines.append(f"{role}: {content}")
     return "\n".join(lines)
+
+
+def _md_table(headers, rows) -> list:
+    """'| h1 | h2 | ... |' pipe-table lines: header row, separator, then one row
+    per item. Shared by every deterministic renderer below that builds a small
+    ad-hoc table (as opposed to a full trial listing -- see column_catalog.
+    trial_markdown_table for that case)."""
+    lines = ["| " + " | ".join(str(h) for h in headers) + " |",
+             "|" + "---|" * len(headers)]
+    for row in rows:
+        lines.append("| " + " | ".join(str(c) for c in row) + " |")
+    return lines
+
+
+def _citations_block(citations, fallback_source) -> list:
+    """'**Supporting Citations**' section: one line per citation stub, or a bare
+    source-id fallback when no citation metadata was gathered. Shared by
+    _synthesize_arm_comparison and _synthesize_trial_detail -- NOT by
+    _synthesize_landscape, whose citations line is always-static rather than
+    branching on `citations`."""
+    lines = ["\n**Supporting Citations**"]
+    if citations:
+        for c in citations:
+            lines.append(f"- {c.get('field_name')}: confidence {c.get('confidence_score')} "
+                         f"({c.get('hedge_instruction')}) — {c.get('source_link')}")
+    else:
+        lines.append(f"- Source: {fallback_source}")
+    return lines
 
 
 def _gather_citations(tool_result: dict) -> list:
@@ -198,7 +227,7 @@ def _synthesize_arm_comparison(tr: dict, citations: list) -> dict:
     if tr.get("error"):
         lines = [f"**{tr.get('message') or tr['error']}**"]
         for c in (tr.get("candidates") or []):
-            ident = c.get("nct_id") or c.get("oncosuite_id")
+            ident = c.get("oncosuite_id") or c.get("nct_id")
             phase = f" ({c['phase']})" if c.get("phase") else ""
             title = f" — {c['title']}" if c.get("title") else ""
             lines.append(f"- `{ident}`{phase}{title}")
@@ -242,28 +271,24 @@ def _synthesize_arm_comparison(tr: dict, citations: list) -> dict:
 
     lines.append("\n**Comparison Table**\n")
     if table_rows:
-        lines.append("| Endpoint | " + " | ".join(arm_names) + " |")
-        lines.append("|---" * (len(arm_names) + 1) + "|")
-        for row in table_rows:
-            lines.append("| " + " | ".join(str(c) for c in row) + " |")
+        lines.extend(_md_table(["Endpoint"] + arm_names, table_rows))
     else:
         lines.append("_No efficacy endpoint data reported for this trial yet._")
 
     if ae_burden:
         lines.append("\n**Safety Comparison**\n")
-        lines.append("| Arm | All-grade AEs | Grade 3-4 AEs |")
-        lines.append("|---|---|---|")
-        for arm_label, counts in ae_burden.items():
-            lines.append(f"| {arm_label} | {counts['all']} | {counts['g34']} |")
+        lines.extend(_md_table(
+            ["Arm", "All-grade AEs", "Grade 3-4 AEs"],
+            [[arm_label, counts["all"], counts["g34"]] for arm_label, counts in ae_burden.items()],
+        ))
 
     if hrs:
         lines.append("\n**Hazard Ratios**\n")
-        lines.append("| Endpoint | Comparison | HR | CI | p-value |")
-        lines.append("|---|---|---|---|---|")
-        for hr in hrs:
-            lines.append(f"| {hr.get('endpoint_abbreviation', hr.get('endpoint_name'))} "
-                         f"| {hr.get('arm_comparison')} | {hr.get('hr_value_and_range')} "
-                         f"| {hr.get('hr_ci')} | {hr.get('p_value')} |")
+        lines.extend(_md_table(
+            ["Endpoint", "Comparison", "HR", "CI", "p-value"],
+            [[hr.get("endpoint_abbreviation", hr.get("endpoint_name")), hr.get("arm_comparison"),
+              hr.get("hr_value_and_range"), hr.get("hr_ci"), hr.get("p_value")] for hr in hrs],
+        ))
 
     lines.append("\n**Key Clinical Insights**")
     if not table_rows and not ae_burden:
@@ -274,13 +299,7 @@ def _synthesize_arm_comparison(tr: dict, citations: list) -> dict:
         if ae_burden:
             lines.append(f"- Safety burden compared across {len(ae_burden)} arm(s) using reported grade 3-4 counts.")
 
-    lines.append("\n**Supporting Citations**")
-    if citations:
-        for c in citations:
-            lines.append(f"- {c.get('field_name')}: confidence {c.get('confidence_score')} "
-                         f"({c.get('hedge_instruction')}) \u2014 {c.get('source_link')}")
-    else:
-        lines.append(f"- Source: {tr.get('oncosuite_id')}")
+    lines.extend(_citations_block(citations, tr.get('oncosuite_id')))
 
     return {"text": "\n".join(lines), "mode": "deterministic", "table_data": table_rows}
 
@@ -302,11 +321,11 @@ def _synthesize_landscape(tr: dict, citations: list) -> dict:
             continue
         count_key = "trial_count" if "trial_count" in rows[0] else "trial_drug_count"
         lines.append(f"\n**Comparison Table \u2014 by {dimension.replace('_', ' ')}**\n")
-        lines.append(f"| {dimension.replace('_', ' ').title()} | Trials | Example Trial IDs |")
-        lines.append("|---|---|---|")
-        for r in rows[:15]:
-            examples = ", ".join((r.get("example_trial_ids") or [])[:3])
-            lines.append(f"| {r.get('group_key')} | {r.get(count_key)} | {examples} |")
+        lines.extend(_md_table(
+            [dimension.replace('_', ' ').title(), "Trials", "Example Trial IDs"],
+            [[r.get('group_key'), r.get(count_key), ", ".join((r.get("example_trial_ids") or [])[:3])]
+             for r in rows[:15]],
+        ))
         if len(rows) >= 2:
             leader = rows[0]
             lines.append(f"\n_{leader.get('group_key')} leads with {leader.get(count_key)} trials "
@@ -318,11 +337,11 @@ def _synthesize_landscape(tr: dict, citations: list) -> dict:
             by_unit.setdefault(r.get("unit_category"), []).append(r)
         for unit_cat, rows in by_unit.items():
             lines.append(f"\n**Outcome Averages \u2014 {unit_cat}**\n")
-            lines.append(f"| Drug | Trials | Avg Value | # Values |")
-            lines.append("|---|---|---|---|")
-            for r in rows:
-                lines.append(f"| {r.get('group_key')} | {r.get('trial_count')} "
-                             f"| {r.get('avg_value')} | {r.get('n_values')} |")
+            lines.extend(_md_table(
+                ["Drug", "Trials", "Avg Value", "# Values"],
+                [[r.get('group_key'), r.get('trial_count'), r.get('avg_value'), r.get('n_values')]
+                 for r in rows],
+            ))
         if outcome_avgs.get("_note"):
             lines.append(f"\n_{outcome_avgs['_note']}_")
 
@@ -396,13 +415,7 @@ def _synthesize_trial_detail(tr: dict, citations: list) -> dict:
         lines.append("\n**Key Clinical Insights**")
         lines.extend(insights)
 
-    lines.append("\n**Supporting Citations**")
-    if citations:
-        for c in citations:
-            lines.append(f"- {c.get('field_name')}: confidence {c.get('confidence_score')} "
-                         f"({c.get('hedge_instruction')}) — {c.get('source_link')}")
-    else:
-        lines.append(f"- Source: {tr.get('oncosuite_id')}")
+    lines.extend(_citations_block(citations, tr.get('oncosuite_id')))
 
     return {"text": "\n".join(lines), "mode": "deterministic", "table_data": None}
 
@@ -420,13 +433,12 @@ def _synthesize_search_results(tr: dict, citations: list) -> dict:
              + ("" if len(results) >= total
                 else " Ask **\"show all\"** to page through the full list.")]
 
+    # Columns are whatever search_trials actually returned (column_catalog.
+    # TRIAL_COLUMNS keys) rather than a hardcoded 7, so a query that asked for
+    # extra detail (sponsor type, lead org, ...) renders it here too.
+    from column_catalog import trial_markdown_table
     lines.append("\n**Matching Trials**\n")
-    lines.append("| # | NCT ID | Trial | Phase | Status | Sponsor | Enrollment |")
-    lines.append("|---|---|---|---|---|---|---|")
-    for i, r in enumerate(results, start=1):     # show the FULL page, not just 15
-        title = (r.get("title") or "")[:80]
-        lines.append(f"| {i} | {r.get('nct_id') or '—'} | {title} | {r.get('phase') or '—'} "
-                     f"| {r.get('status') or '—'} | {r.get('sponsor') or '—'} | {r.get('enrollment') or '—'} |")
+    lines.extend(trial_markdown_table(results, tr.get("columns")))
 
     by_sponsor = {}
     for r in results:

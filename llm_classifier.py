@@ -20,6 +20,7 @@ import json
 import re
 
 import llm_client
+from column_catalog import COHORT_COLUMNS, TRIAL_COLUMNS
 
 _VOCAB_CACHE = None
 
@@ -58,10 +59,26 @@ _INTENTS = (
 )
 
 
+def _extra_column_keys():
+    """Opt-in column_catalog keys the model is allowed to request via
+    filters.columns -- everything downstream (resolve_keys/validate_keys)
+    ignores anything else, but listing the real set here means the model
+    rarely wastes a guess on a column that doesn't exist."""
+    trial_extra = [k for k, v in TRIAL_COLUMNS.items() if not v.get("default")]
+    cohort_extra = [k for k, v in COHORT_COLUMNS.items() if not v.get("default")]
+    seen, out = set(), []
+    for k in trial_extra + cohort_extra:
+        if k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
 def _system_prompt():
     v = _load_vocab()
     phases = ", ".join(v["phases"]) or "Phase 1, Phase 2, Phase 3, Phase 4"
     statuses = ", ".join(v["statuses"]) or "Recruiting, Completed, Terminated"
+    extra_cols = ", ".join(_extra_column_keys())
     return (
         "You are the intent classifier for a clinical-trials assistant backed by a "
         "PostgreSQL database (oncosuite_gold). Read the user's question and output ONLY a "
@@ -73,12 +90,41 @@ def _system_prompt():
         '  "filters": {\n'
         '     "condition": [..], "biomarkers": [..], "cancer_stage": [..],\n'
         '     "line_of_therapy": [..], "phase": [..], "study_status": [..],\n'
-        '     "sponsor": [..], "drug_name_or_target": [..]\n'
+        '     "sponsor": [..], "drug_name_or_target": [..],\n'
+        '     "prior_therapy": [..], "reported_outcomes": [..], "columns": [..]\n'
         '  }\n'
         "}\n\n"
         "RULES:\n"
         "- Extract filter TERMS as the user means them; do not invent values. Leave a "
         "filter out entirely if not mentioned.\n"
+        "- \"condition\" is the DISEASE filter and it fans out across four columns: "
+        "organ, histology, sub_histology and histology_variant. So put ANY disease term "
+        "here, at whatever level the user used -- the ORGAN ('lung', 'breast', "
+        "'ovarian'), the HISTOLOGY ('NSCLC', 'SCLC'), a SUB-HISTOLOGY "
+        "('adenocarcinoma', 'squamous cell carcinoma', 'large cell carcinoma', "
+        "'B-cell lymphoma'), or a variant. There is no separate 'histology' or 'organ' "
+        "filter -- do not invent one, and never drop a disease term because it looks "
+        "too specific or too broad for this key.\n"
+        "- \"prior_therapy\" is what patients must already have received "
+        "('previously treated with osimertinib', 'after platinum chemotherapy', "
+        "'progressed on a checkpoint inhibitor') -- distinct from "
+        "drug_name_or_target, which is what the trial is TESTING.\n"
+        "- \"reported_outcomes\" is for questions restricted to trials that actually "
+        "REPORT given endpoints ('trials with OS reported', 'which have ORR data') -- "
+        "use the abbreviations: OS, PFS, ORR, DoR, TTP, EFS, DFS.\n"
+        "- Trial identifiers are NOT filters: an NCT id goes in the top-level "
+        "\"nct_id\" field, and an OncoSuite id (three dash-separated 3-character "
+        "groups, e.g. 8bN-3eH-W5g) also identifies ONE trial -- either means intent "
+        "'single_trial_lookup' (or 'outcome_deep_dive' when the question is "
+        "specifically about that trial's endpoints/efficacy).\n"
+        "- \"drug_name_or_target\" covers more than a literal drug name or molecular "
+        "target -- it also covers drug CLASS / MODALITY / mechanism terms, since the "
+        "database records those on the same drug record (e.g. modality = "
+        "'Antibody-Drug Conjugate (ADC)'). Put terms like 'ADC', 'bispecific "
+        "(antibody)', 'CAR-T'/'cell therapy', 'checkpoint inhibitor', 'kinase "
+        "inhibitor'/'TKI', 'monoclonal antibody', 'cancer vaccine', 'radiopharmaceutical', "
+        "'immunotherapy', 'chemotherapy', 'targeted therapy' here too -- do NOT drop "
+        "them just because they aren't a specific drug/target name.\n"
         f"- phase must map to one of: {phases}. (e.g. 'phase III' -> 'Phase 3', "
         "'late stage' -> ['Phase 3'].)\n"
         f"- study_status must map to one of: {statuses}. ('open'/'enrolling' -> "
@@ -98,6 +144,10 @@ def _system_prompt():
         "'single_trial_lookup' (or 'outcome_deep_dive' if specifically about "
         "endpoints/efficacy).\n"
         "- Greetings/definitions/off-topic with no trial data need => 'out_of_scope'.\n"
+        "- If the question names specific extra fields, or asks for more detail/columns "
+        f"than a basic table, set \"columns\" to whichever of these it implies: {extra_cols}. "
+        "Only use keys from that exact list -- never invent one. Leave \"columns\" out "
+        "entirely for an ordinary question; most questions need no extra columns.\n"
         "- Output ONLY the JSON object."
     )
 
@@ -114,16 +164,21 @@ def _extract_json(text):
 
 
 # filter keys we forward to the tools (drop anything else the model dreamed up)
+# Must stay in step with search_trials()'s own parameters -- the router forwards
+# these straight through as **filters, so a key listed here but absent there
+# raises, and one accepted there but missing here is silently dropped (which is
+# what kept prior_therapy / reported_outcomes from ever being used).
 _ALLOWED_FILTER_KEYS = {
     "condition", "biomarkers", "cancer_stage", "line_of_therapy", "phase",
-    "study_status", "sponsor", "drug_name_or_target",
+    "study_status", "sponsor", "drug_name_or_target", "columns",
+    "prior_therapy", "reported_outcomes",
 }
 
 # Genuine cross-trial grouping/statistics/comparison -- these need real SQL, unlike
 # a bare count of trials matching concrete filters (search_trials's total_matches
-# already answers that). Mirrors router.py's keyword-fallback classifier so both
-# paths agree on what actually needs text-to-SQL. See classify()'s aggregate_query
-# downgrade below.
+# already answers that). Shared with router.py's keyword-fallback classifier (it
+# imports this constant) so both paths agree on what actually needs text-to-SQL.
+# See classify()'s aggregate_query downgrade below.
 _TRUE_AGG_WORDS = (
     "average", "avg", "mean", "median", "sum",
     "most", "least", "fewest", "highest", "lowest", "top ", "rank",

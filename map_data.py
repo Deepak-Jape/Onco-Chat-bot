@@ -57,35 +57,78 @@ def _population_by_country():
     return by_iso3, by_name
 
 
-_country_names_cache = None
+_country_tokens_cache = None
 
 
-def _known_country_names():
-    """Proper-case country names from population.csv, longest first so e.g.
-    'United States' is tried before a shorter name that might substring-match."""
-    global _country_names_cache
-    if _country_names_cache is None:
-        names = []
+def _known_country_tokens():
+    """[(proper name, iso3 or "")] from population.csv, longest name first.
+
+    The CSV stores countries as "United States ( USA )", so _country_and_iso3
+    yields both halves -- keeping the code alongside the name is what lets a
+    question say "usa" instead of spelling the country out, without a
+    hand-maintained alias table. Longest-first so "United States" is tried
+    before a shorter name that might substring-match.
+    """
+    global _country_tokens_cache
+    if _country_tokens_cache is None:
+        tokens = {}
         try:
             with io.open(_POP_CSV, encoding="utf-8", errors="replace") as fh:
                 for row in csv.DictReader(fh):
-                    name, _ = _country_and_iso3(row.get("country"))
+                    name, iso3 = _country_and_iso3(row.get("country"))
                     if name:
-                        names.append(name)
+                        # First code wins; later duplicate rows don't clobber it.
+                        tokens.setdefault(name, iso3 or "")
         except OSError:
             pass
-        _country_names_cache = sorted(set(names), key=len, reverse=True)
-    return _country_names_cache
+        _country_tokens_cache = sorted(
+            tokens.items(), key=lambda kv: len(kv[0]), reverse=True
+        )
+    return _country_tokens_cache
+
+
+def _known_country_names():
+    """Proper-case country names only -- kept for callers that don't need codes."""
+    return [name for name, _ in _known_country_tokens()]
 
 
 def _country_in_question(question):
     """First known country name mentioned in the question, or None. Whole-word
-    matched so e.g. 'China' doesn't fire on an unrelated substring."""
+    matched so e.g. 'China' doesn't fire on an unrelated substring.
+
+    Both the proper name AND the ISO code are matched, because the data itself
+    carries both -- the analytics views store countries as "United States
+    ( USA )", so the codes are part of the vocabulary rather than a list we have
+    to maintain by hand. That makes "for usa" resolve without hardcoding
+    aliases, and it stays correct as the data changes.
+
+    Codes are tried FIRST (they are the shorter, more ambiguous strings) and the
+    \\b anchors keep "UK" from matching inside "Ukraine".
+    """
     q = str(question or "")
-    for name in _known_country_names():
+    for name, code in _known_country_tokens():
+        if code and re.search(rf"\b{re.escape(code)}\b", q, re.IGNORECASE):
+            return name
+    for name, _ in _known_country_tokens():
         if re.search(rf"\b{re.escape(name)}\b", q, re.IGNORECASE):
             return name
     return None
+
+
+def country_filter_value(question):
+    """The country in `question` as "Name ( CODE )", or None.
+
+    ctsearch's analytics APIs match countries on this EXACT display form -- the
+    bare name silently returns an empty result set (summary 0, no points), which
+    renders as a blank chart rather than an error. Every filter payload must
+    therefore carry the code, so resolve it here once instead of at each call
+    site.
+    """
+    name = _country_in_question(question)
+    if not name:
+        return None
+    code = dict(_known_country_tokens()).get(name)
+    return f"{name} ( {code} )" if code else name
 
 
 def build_country_site_map(country_name, oncosuite_ids=None, limit=3000):

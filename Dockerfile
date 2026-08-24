@@ -19,8 +19,10 @@ COPY . .
 RUN useradd -r -u 10001 oncosuite && chown -R oncosuite:oncosuite /app
 USER oncosuite
 
-# Served inside the container on 8014 (matches ONCOSUITE_PORT); nginx on the host
-# proxies https://.../chat-bot -> this port.
+# Served inside the container on 8014 (matches ONCOSUITE_PORT); the VM's Caddy
+# proxies /chat-bot* on the public domain -> this port, same convention as its
+# other services (/search/*, /analytics/*, etc.). ctsearch (the frontend) is a
+# separate, non-Docker deploy (git pull + npm run build on the VM).
 ENV ONCOSUITE_HOST=0.0.0.0 \
     ONCOSUITE_PORT=8014 \
     ONCOSUITE_BASE_PATH=/chat-bot

@@ -190,7 +190,14 @@ def _json(rows):
     return json.dumps(plain(rows), indent=1)[:6000]
 
 
-MAX_SQL_ATTEMPTS = 3  # generate -> if it errors or returns nothing, self-correct & retry
+# generate -> if it errors or returns nothing, self-correct & retry.
+#
+# 5 rather than 3: the failure modes are different and each needs its own shot.
+# A bad column name is corrected in one round, but "0 rows" is ambiguous -- the
+# query may be too strict, join the wrong way, or filter on the wrong column --
+# and working through those genuinely takes several attempts. Each retry carries
+# the exact error back, so later attempts are informed rather than repeats.
+MAX_SQL_ATTEMPTS = 5
 
 
 def run(question: str, history=None) -> dict:
@@ -207,6 +214,9 @@ def run(question: str, history=None) -> dict:
     """
     error_hint = None
     prev_sql = None
+    # Queries that ran cleanly but returned nothing. Fed back so a later attempt
+    # does not re-propose one we already know is empty.
+    tried = []
     last = {"status": "invalid_sql", "sql": None, "rows": [], "answer": None,
             "reason": "no attempt made"}
 
@@ -239,10 +249,33 @@ def run(question: str, history=None) -> dict:
         if not rows:
             last = {"status": "no_data", "sql": safe_sql, "rows": [], "answer": None,
                     "reason": "query ran but returned no rows"}
-            # empty could be a genuinely empty set OR a too-strict query; ask for a
-            # broader/corrected attempt, but keep this as the fallback if retries also fail.
-            error_hint, prev_sql = ("the query returned 0 rows; if the question should "
-                                    "have data, relax overly strict filters or fix joins"), safe_sql
+            # "0 rows" is the ambiguous case: the set may genuinely be empty, or
+            # the query may be too strict / joining wrongly / filtering the wrong
+            # column. Repeating one generic hint wastes the extra attempts, so
+            # escalate the strategy each round and name what has already been
+            # tried, which stops the model re-emitting a query we know fails.
+            tried.append(safe_sql)
+            strategies = [
+                "the query returned 0 rows. Relax the most restrictive WHERE "
+                "clause -- try a LIKE/ILIKE instead of equality on any text "
+                "filter.",
+                "still 0 rows. The join may be dropping everything: check the "
+                "join keys, and try LEFT JOIN instead of INNER JOIN.",
+                "still 0 rows. The filter may be on the wrong column or the "
+                "value may be spelled differently in the data -- widen the "
+                "filter, or drop the least essential one entirely.",
+                "still 0 rows. Answer the SIMPLEST version of the question "
+                "that the schema supports, even if it omits a secondary "
+                "filter, rather than returning nothing.",
+            ]
+            error_hint = strategies[min(len(tried) - 1, len(strategies) - 1)]
+            if len(tried) > 1:
+                error_hint += (
+                    "\n\nThese queries have already been tried and each "
+                    "returned 0 rows -- do not repeat them:\n"
+                    + "\n---\n".join(tried)
+                )
+            prev_sql = safe_sql
             continue
 
         # success -> phrase the answer

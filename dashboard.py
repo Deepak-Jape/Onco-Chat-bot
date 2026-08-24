@@ -7,7 +7,10 @@ the alternative is inventing numbers. Coverage is genuinely sparse for outcome
 values (roughly 8% of ORR endpoints carry a number), so expect real gaps.
 """
 
+import re
+
 from db import get_conn
+from tools.search_cohorts import regimen_drug_details
 
 # Cohorts are reached from drugs through
 # drug -> treatment -> stratification -> arm -> cohort -> trial.
@@ -16,6 +19,11 @@ SELECT t.oncosuite_id,
        t.trial_phase,
        co.cohort_id,
        co.histology,
+       co.sub_histology,
+       co.histology_variant,
+       co.organ,
+       co.biomarkers,
+       co.biomarker_variant,
        co.line_of_therapy,
        STRING_AGG(DISTINCT d.name, ' + ') AS regimen,
        t.planned_enrollment_count,
@@ -31,8 +39,9 @@ SELECT t.oncosuite_id,
  WHERE d.modality = %s
    AND t.start_date >= (CURRENT_DATE - (%s || ' years')::interval)
  GROUP BY t.oncosuite_id, t.trial_phase, co.cohort_id, co.histology,
-          co.line_of_therapy, t.planned_enrollment_count, t.enrollment_count,
-          t.study_status, t.start_date
+          co.sub_histology, co.histology_variant, co.organ, co.biomarkers,
+          co.biomarker_variant, co.line_of_therapy, t.planned_enrollment_count,
+          t.enrollment_count, t.study_status, t.start_date
  ORDER BY t.start_date DESC
  LIMIT %s
 """
@@ -110,21 +119,47 @@ SELECT COUNT(DISTINCT a.arm_id)
 """
 
 
-def _first(js):
-    """cohort_info stores histology / line_of_therapy as jsonb arrays."""
-    if isinstance(js, list) and js:
-        return str(js[0])
+def _all(js):
+    """Every value in a jsonb array, in order, deduplicated -- ctsearch's own
+    trial table shows e.g. "SCLC + Lung" by joining every histology AND organ
+    entry, not just the first of each."""
+    if isinstance(js, list):
+        seen, out = set(), []
+        for v in js:
+            s = str(v).strip() if v is not None else ""
+            if s and s not in seen:
+                seen.add(s)
+                out.append(s)
+        return out
     if isinstance(js, str) and js.strip():
-        return js
-    return None
+        return [js.strip()]
+    return []
 
 
-def _indication(histology, line):
-    parts = [p for p in (_first(line), _first(histology)) if p]
-    return " ".join(parts) if parts else None
+def _indication(histology, sub_histology, histology_variant, organ,
+                 biomarkers, biomarker_variant):
+    """Same fields ctsearch's own trial table shows under "Indication" --
+    histology, its sub-type/variant, organ and biomarkers, every value in
+    each jsonb array joined with " + " (e.g. "Non-Squamous NSCLC + NSCLC +
+    Lung"), deduplicated across fields since histology/organ/biomarker
+    entries sometimes repeat each other."""
+    parts = []
+    seen = set()
+    for js in (histology, sub_histology, histology_variant, organ,
+               biomarkers, biomarker_variant):
+        for p in _all(js):
+            if p not in seen:
+                seen.add(p)
+                parts.append(p)
+    return " + ".join(parts) if parts else None
 
 
-_EFFICACY_METRICS = ("ORR", "OS", "PFS")
+# Only ORR/SAE/AE ever populate the `orr`/`sae` point fields below -- the
+# chart these feed (NewTreatment.jsx's EfficacyVsSafety, vendored/unmodified)
+# always plots those two literal fields regardless of which axis its own
+# dropdowns show, so OS/PFS could never actually be picked as a default here
+# without the chart silently rendering nothing for every point.
+_EFFICACY_METRICS = ("ORR",)
 _SAFETY_METRICS = ("SAE", "AE")
 
 
@@ -139,7 +174,8 @@ def _build_efficacy_safety_scatter(rows, outcomes, safety):
     common case: most trials haven't posted outcomes yet).
     """
     points = []
-    for (oid, phase, cohort_id, hist, line, regimen,
+    for (oid, phase, cohort_id, hist, sub_hist, hist_variant, organ,
+         biomarkers, biomarker_variant, line, regimen,
          _planned, _enrolled, _status, year) in rows:
         metrics = {}
         for m, v in (outcomes.get(cohort_id) or {}).items():
@@ -158,7 +194,8 @@ def _build_efficacy_safety_scatter(rows, outcomes, safety):
             "n": 1,
             "strategy": regimen or "Unknown",
             "biomarker": phase or "Unknown",
-            "mode": _indication(hist, line) or "Unknown",
+            "mode": _indication(hist, sub_hist, hist_variant, organ,
+                                 biomarkers, biomarker_variant) or "Unknown",
             "phase": phase,
             "year": str(year) if year else None,
             "lineOfTherapy": line if isinstance(line, list) else [],
@@ -219,6 +256,13 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
         cohort_ids = tuple(r[2] for r in rows)
         trial_ids = tuple({r[0] for r in rows})
 
+        # Per-drug treatment detail for the Regimen column's hover tooltip --
+        # dosage, schedule, duration, treatment status and route, straight
+        # from oncosuite_gold.treatment_info. Same helper tools/search_cohorts
+        # uses, so a drug's name lines up exactly with the STRING_AGG'd
+        # regimen text above (both are built from the same treatment_info.drug_name).
+        drug_details = regimen_drug_details(list(cohort_ids))
+
         outcomes = {}
         cur.execute(_OUTCOME_SQL, (cohort_ids,))
         for cohort_id, metric, value in cur.fetchall():
@@ -238,7 +282,7 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
         cur.execute(_ARM_COUNT_SQL, (trial_ids,))
         arm_count = cur.fetchone()[0]
 
-    years_seen = [r[9] for r in rows if r[9]]
+    years_seen = [r[14] for r in rows if r[14]]
     def _metric(value, unit):
         """'24.6 mo' style cell. Returns None when the database has no value --
         the table shows an em dash rather than a fabricated figure."""
@@ -251,36 +295,75 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
         text = f"{num:g}"
         return f"{text}{unit}" if unit == "%" else f"{text} {unit}"
 
-    def _n(planned, enrolled):
+    # Study statuses where enrollment has not concluded, so the trial's
+    # *actual* accrual is still zero (or in progress) regardless of what
+    # trial_info.enrollment_count says.
+    _PRE_ACCRUAL_STATUS = {
+        "not yet recruiting", "recruiting", "enrolling by invitation",
+        "available", "withheld", "withdrawn",
+    }
+
+    def _n(planned, enrolled, status):
         # trial_info.enrollment_count is NOT a live "how many have enrolled
         # so far" count -- confirmed against the whole database: it equals
         # planned_enrollment_count for 100% of Recruiting, Not Yet
         # Recruiting, and Enrolling-By-Invite trials (ClinicalTrials.gov
         # reports "Enrollment" as the anticipated target until a trial
-        # concludes, not a running total). Showing it as "(Enrolled)"
-        # whenever it happens to match the target falsely implies the trial
-        # has already hit its enrollment goal. The Executive Summary drawer
-        # (executive_summary.py, a separately-curated payload) already only
-        # shows Planned for exactly this reason -- match that here instead
-        # of showing a second, contradicting figure for the same trial.
+        # concludes, not a running total).
+        #
+        # ctsearch's own feasibility table (the web app) still shows BOTH
+        # lines for such a trial, reporting actual as 0 -- e.g. jVh-8Cy-esB,
+        # Recruiting, planned == enrollment_count == 100, renders as
+        # "0 (Actual) / 100 (Target)". Match that, so the same trial reads
+        # identically in the chatbot and the web app. The suppression this
+        # used to do produced a single "(Target)" line and made the two
+        # surfaces disagree.
         bits = []
+        pre = str(status or "").strip().lower() in _PRE_ACCRUAL_STATUS
+        actual = 0 if (pre and enrolled == planned) else enrolled
+        if actual is not None:
+            bits.append(f"{actual} (Actual)")
         if planned is not None:
-            bits.append(f"{planned} (Planned)")
-        if enrolled is not None and enrolled != planned:
-            bits.append(f"{enrolled} (Enrolled)")
+            bits.append(f"{planned} (Target)")
         return "\n".join(bits) if bits else None
+
+    def _phase(value):
+        """'Phase 2' -> 'P2', 'Phase 1/2' -> 'P1/2', 'Early Phase 1' -> 'EP1'.
+
+        Abbreviated so the column stays narrow; the full vocabulary is the
+        eight distinct trial_phase values in oncosuite_gold.trial_info.
+        """
+        s = str(value or "").strip()
+        if not s:
+            return None
+        m = re.match(r"^(early\s+)?phase\s+(.+)$", s, re.I)
+        if not m:
+            return s
+        return f"{'EP' if m.group(1) else 'P'}{m.group(2).strip()}"
 
     # CommonTableCard reads rows as {col.key: value}, so emit that shape here.
     table_rows = []
-    for (oid, phase, cohort_id, hist, line, regimen,
+    for (oid, phase, cohort_id, hist, sub_hist, hist_variant, organ,
+         biomarkers, biomarker_variant, line, regimen,
          planned, enrolled, status, _yr) in rows:
         vals = outcomes.get(cohort_id, {})
         table_rows.append({
             "oncosuite_id": oid,
-            "phase": phase,
-            "indication": _indication(hist, line),
+            "phase": _phase(phase),
+            "indication": _indication(hist, sub_hist, hist_variant, organ,
+                                       biomarkers, biomarker_variant),
             "regimen": regimen,
-            "n": _n(planned, enrolled),
+            "regimenDetail": {
+                name: {
+                    "dosage": d.get("dosage"),
+                    "schedule": d.get("schedule"),
+                    "duration": d.get("duration"),
+                    "treatmentStatus": d.get("treatment_status"),
+                    "modeOfAdministration": d.get("mode_of_administration"),
+                }
+                for name, d in (drug_details.get(cohort_id) or {}).items()
+            },
+            "n": _n(planned, enrolled, status),
             "status": status,
             "year": _yr,
             # None -> the table renders an em dash. Never substituted with a
@@ -346,12 +429,15 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
              "enrollment_count", "start_date"],
         )
         cohort_trace = raw_trace_by_record_id(
-            cohort_ids, "cohort_info", ["histology", "line_of_therapy"],
+            cohort_ids, "cohort_info",
+            ["histology", "sub_histology", "histology_variant", "organ",
+             "biomarkers", "biomarker_variant", "line_of_therapy"],
         )
 
         comments = {}
         evidence = {}
-        for row_i, (oid, _phase, cohort_id, _hist, _line, _regimen,
+        for row_i, (oid, _phase, cohort_id, _hist, _sub_hist, _hist_variant,
+                    _organ, _biomarkers, _biomarker_variant, _line, _regimen,
                     planned_val, enrolled_val, _status, _yr) in enumerate(rows):
             phase_rows = trial_trace.get((oid, "trial_phase"))
             if phase_rows:
@@ -368,14 +454,17 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
                 comments[(row_i, "status")] = format_comment(status_rows)
                 evidence[(row_i, "status")] = to_evidence_records(status_rows, "Status")
 
-            # "Enrolled" is only shown at all when it differs from "Planned"
-            # (see _n() above -- trial_info.enrollment_count is a copy of
-            # the target for every still-recruiting trial, not a real
-            # count), so its traceability shouldn't be attached here either
-            # -- there's no "(Enrolled)" text left on the cell to explain.
-            show_enrolled = enrolled_val is not None and enrolled_val != planned_val
+            # The cell now always carries both an "(Actual)" and a "(Target)"
+            # line (see _n() above), so both source fields get traceability.
+            # enrollment_count is skipped only where _n() itself substituted a
+            # literal 0 for a not-yet-accrued trial -- there is no source row
+            # behind that 0 to cite.
+            substituted_zero = (
+                str(status or "").strip().lower() in _PRE_ACCRUAL_STATUS
+                and enrolled_val == planned_val
+            )
             n_fields = [("planned_enrollment_count", "N Target")]
-            if show_enrolled:
+            if enrolled_val is not None and not substituted_zero:
                 n_fields.append(("enrollment_count", "N Actual"))
 
             n_rows = [row for field, _ in n_fields for row in (trial_trace.get((oid, field)) or [])]
@@ -388,19 +477,26 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
                     for rec in to_evidence_records(trial_trace.get((oid, field)), label)
                 ]
 
-            hist_rows = cohort_trace.get((cohort_id, "histology"))
-            line_rows = cohort_trace.get((cohort_id, "line_of_therapy"))
-            if hist_rows or line_rows:
-                ind_parts = []
-                if hist_rows:
-                    ind_parts.append("Histology:\n" + format_comment(hist_rows))
-                if line_rows:
-                    ind_parts.append("Line of therapy:\n" + format_comment(line_rows))
-                comments[(row_i, "indication")] = "\n\n".join(ind_parts)
-                evidence[(row_i, "indication")] = (
-                    to_evidence_records(hist_rows, "Histology")
-                    + to_evidence_records(line_rows, "Line of Therapy")
+            ind_fields = [
+                ("histology", "Histology"),
+                ("sub_histology", "Sub-Histology"),
+                ("histology_variant", "Histology Variant"),
+                ("organ", "Organ"),
+                ("biomarkers", "Biomarkers"),
+                ("biomarker_variant", "Biomarker Variant"),
+                ("line_of_therapy", "Line of Therapy"),
+            ]
+            ind_rows = {label: cohort_trace.get((cohort_id, field))
+                        for field, label in ind_fields}
+            if any(ind_rows.values()):
+                comments[(row_i, "indication")] = "\n\n".join(
+                    f"{label}:\n{format_comment(rows_)}"
+                    for label, rows_ in ind_rows.items() if rows_
                 )
+                evidence[(row_i, "indication")] = [
+                    rec for label, rows_ in ind_rows.items() if rows_
+                    for rec in to_evidence_records(rows_, label)
+                ]
 
         xlsx_columns = [
             {"key": "oncosuite_id", "label": "OncoSuite ID"},
@@ -648,6 +744,19 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
     except Exception:
         pass
 
+    # KM survival curve: oncosuite_gold.results_analytics only covers a
+    # handful of trials database-wide, so this is scoped to the current
+    # modality's trial set and simply omitted (with an honest note below)
+    # when none of them happen to be among those few.
+    km = None
+    try:
+        from chart_data import build_km_curve
+        km = build_km_curve(list(trial_ids))
+    except Exception:
+        km = None
+    if km:
+        blocks.append({"type": "chart", "chart": "KMCurve", "props": km})
+
     if insights:
         blocks.append({"type": "insights", "title": "Key Learnings", "items": insights})
 
@@ -701,10 +810,12 @@ def build_cohort_dashboard(modality="Antibody-Drug Conjugate (ADC)",
             "for the same arm, and these trials have no rows in the analytics "
             "efficacy/safety dataset."
         )
-    missing.append(
-        "KM curve is not shown: the database holds no per-timepoint survival "
-        "probabilities or at-risk counts."
-    )
+    if not km:
+        missing.append(
+            "KM curve is not shown: none of these trials are among the small "
+            "set oncosuite_gold.results_analytics currently covers with "
+            "per-timepoint survival probabilities or at-risk counts."
+        )
     if missing:
         blocks.append({"type": "note", "items": missing})
 

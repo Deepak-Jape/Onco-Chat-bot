@@ -1,32 +1,37 @@
-# OncoSuite on the shared VM: React UI (nginx) + Python backend, under /chat-bot.
-# Public URL: http://204.168.157.213/chat-bot
+# OncoSuite backend on the shared VM.
 #
-# The VM's Caddyfile stays EXACTLY as it is:
-#     handle /chat-bot* { reverse_proxy oncosuite:8014 }
+# Backend-only: the frontend is ctsearch, built and deployed independently on the
+# VM (git pull + npm run build, served as static files) -- NOT a Docker image
+# built from this repo. This compose file only runs the Python API.
 #
-# To make that work without touching Caddy, the two containers SWAP identities:
-#   - `oncosuite`     (was the Python app) is now the UI/nginx container, :8014
-#   - `oncosuite-api` (new name)           is the Python app, :8014, internal only
-# Caddy therefore reaches the UI, which proxies /chat-bot/{ask,api,search} on to
-# the backend over the internal network. Single origin, so no CORS.
+# The VM's Caddy reaches services by container name over the external
+# `app-network` (same convention as its other services -- ct_prod, list_endpoints,
+# analytics_endpoints, etc.), NOT via a published host port. Caddy's UAT site
+# (204.168.157.213.sslip.io) needs a route added:
+#     handle /chat-bot* {
+#         reverse_proxy oncosuite:8014
+#     }
+# (already present on the plain-HTTP site and thinkaiindia.com; add the same
+# block to the sslip.io site since ctsearch's .env now points there over HTTPS).
 #
 # Deploy on the VM:
-#   docker compose pull && docker compose up -d
+#   docker compose up -d
 services:
-  # ---- Python API. Internal only; renamed so the UI can take `oncosuite`. ----
-  oncosuite-api:
+  oncosuite:
     image: deepak0105/oncosuite:latest
     # build: .
-    container_name: oncosuite-api
+    container_name: oncosuite
     restart: unless-stopped
     env_file: .env
-    # The whole app lives under /chat-bot and every hop passes that prefix through
-    # unchanged, so the backend strips it itself. Matches .env.
     environment:
-      ONCOSUITE_BASE_PATH: /chat-bot
       ONCOSUITE_HOST: 0.0.0.0
       ONCOSUITE_PORT: "8014"
-    # No `ports:` -- reachable only from the UI container, never from outside.
+      # Whole app lives under /chat-bot; Caddy passes the path through
+      # unchanged and this app strips the prefix itself.
+      ONCOSUITE_BASE_PATH: /chat-bot
+    # No `ports:` -- reachable only by container name (`oncosuite:8014`) over
+    # app-network, same as the VM's other backend services. Not published to
+    # the host or the internet directly.
     expose:
       - "8014"
     # Let the container reach services (Postgres, Ollama) running on the VM host.
@@ -43,27 +48,6 @@ services:
       retries: 3
       start_period: 15s
     networks:
-      - default
-
-  # ---- React UI. Owns the name `oncosuite` and port 8014 that Caddy targets. ----
-  oncosuite:
-    image: deepak0105/oncosuite-ui:latest
-    # build:
-    #   context: .
-    #   dockerfile: frontend/Dockerfile
-    container_name: oncosuite
-    restart: unless-stopped
-    depends_on:
-      oncosuite-api:
-        condition: service_healthy
-    ports:
-      # Optional -- for debugging on the VM (curl 127.0.0.1:8014/chat-bot/).
-      # Caddy does NOT use this; it connects by container name over app-network.
-      - "127.0.0.1:8014:8014"
-    networks:
-      # `default`: how this container reaches `oncosuite-api`.
-      # `app-network`: how Caddy reaches THIS container as `oncosuite:8014`.
-      - default
       - app-network
 
 networks:

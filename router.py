@@ -17,6 +17,7 @@ implemented exactly as specified, in priority order.
 """
 import re
 
+from column_catalog import COHORT_COLUMNS, TRIAL_COLUMNS, detect_requested_columns
 from conversation import conversations
 from memory import SessionStore
 from tools.search_trials import search_trials
@@ -42,7 +43,21 @@ CLASSIFY_TOOL_SCHEMA = {
                          "landscape_or_trend", "outcome_deep_dive", "clarification_needed",
                          "out_of_scope"],
             },
-            "filters": {"type": "object"},
+            "filters": {
+                "type": "object",
+                "properties": {
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Extra column_catalog keys the user asked for on "
+                                        "top of the default table (e.g. the phrasing names "
+                                        "specific fields or asks for more detail/columns). "
+                                        "Only ever populate with keys that actually appear "
+                                        "in column_catalog.py's TRIAL_COLUMNS/COHORT_COLUMNS "
+                                        "-- never invent a column name.",
+                    },
+                },
+            },
             "resolved_oncosuite_id": {"type": "string"},
             "resolved_arm_ids": {"type": "array", "items": {"type": "integer"}},
         },
@@ -54,6 +69,16 @@ ALWAYS_ESCALATE_INTENTS = {"arm_comparison", "landscape_or_trend",
                            "single_trial_lookup", "filtered_search"}
 RESULT_SIZE_CHECK_INTENTS = {"outcome_deep_dive"}
 RESULT_SIZE_THRESHOLD = 3
+
+# An NCT id, detected throughout this file's keyword-fallback rules. IGNORECASE
+# so callers can match it against either the raw user message or an
+# already-lowercased copy without needing two patterns.
+_NCT_ID_RE = re.compile(r"nct\d{8}", re.IGNORECASE)
+
+# An internal oncosuite_id (e.g. "00v-vw5-Ejz"): 3-3-3 alphanumeric groups
+# separated by hyphens. Always matched against the ORIGINAL message (ids are
+# mixed-case, so this is deliberately case-sensitive).
+_ONCOSUITE_ID_RE = re.compile(r"\b([0-9A-Za-z]{3}-[0-9A-Za-z]{3}-[0-9A-Za-z]{3})\b")
 
 
 def _dynamic_classify(user_message, working_set):
@@ -103,7 +128,7 @@ def classify_and_extract(user_message: str, working_set: dict) -> dict:
             "percentage", "proportion")
     _PORTFOLIO = ("trials", "studies", "sponsors", "phases", "our oncology", "portfolio",
                   "recruiting vs", "vs completed", "vs. completed")
-    if not re.search(r"nct\d{8}", msg) and any(a in msg for a in _AGG) and any(p in msg for p in _PORTFOLIO):
+    if not _NCT_ID_RE.search(msg) and any(a in msg for a in _AGG) and any(p in msg for p in _PORTFOLIO):
         return {"intent": "aggregate_query", "filters": {}}
 
     # A bare count ("how many"/"count"/"number of"/"total number"/"how much"/
@@ -115,7 +140,7 @@ def classify_and_extract(user_message: str, working_set: dict) -> dict:
                              "phase 1", "phase 2", "phase 3", "phase 4",
                              "recruiting", "completed", "terminated", "withdrawn",
                              "suspended", "not yet recruiting")
-    if (not re.search(r"nct\d{8}", msg) and any(a in msg for a in _COUNT_ONLY)
+    if (not _NCT_ID_RE.search(msg) and any(a in msg for a in _COUNT_ONLY)
             and any(p in msg for p in _PORTFOLIO)
             and not any(s in msg for s in _CONCRETE_SCOPE_TERMS)):
         return {"intent": "aggregate_query", "filters": {}}
@@ -147,15 +172,15 @@ def classify_and_extract(user_message: str, working_set: dict) -> dict:
     # generic keyword rules below ("outcome", "survival", "what is", ...) -- otherwise a
     # question like "what are the outcomes for NCT03706690" gets routed to a different
     # tool / rejected as out-of-scope purely because of a keyword, ignoring the NCT id.
-    if re.search(r"nct\d{8}", msg):
-        m = re.search(r"nct\d{8}", msg)
+    m = _NCT_ID_RE.search(msg)
+    if m:
         return {"intent": "single_trial_lookup", "filters": {"nct_id": m.group(0).upper()}}
 
     # A user may paste the INTERNAL oncosuite_id (e.g. "00v-vw5-Ejz") instead of an NCT
     # number. It has a distinctive 3-3-3 alphanumeric-with-hyphens shape. Detect it on
     # the ORIGINAL message (case-sensitive -- ids are mixed-case) and route straight to
     # the trial detail. dispatch resolves + tells the user the linked NCT id.
-    _onco = re.search(r"\b([0-9A-Za-z]{3}-[0-9A-Za-z]{3}-[0-9A-Za-z]{3})\b", user_message)
+    _onco = _ONCOSUITE_ID_RE.search(user_message)
     if _onco:
         return {"intent": "single_trial_lookup",
                 "filters": {"oncosuite_id": _onco.group(1)},
@@ -201,7 +226,12 @@ def classify_and_extract(user_message: str, working_set: dict) -> dict:
 
     if any(w in msg for w in ["landscape", "trend", "how many trials", "competitive"]):
         filters = {}
-        m = re.search(r"for ([a-z0-9\- ]+?)(?: in| trials|$)", msg)
+        # "for X", "in X", "on X" all name the drug/target/modality being asked
+        # about ("how many trials FOR kras", "... IN adc", "... ON pd-l1"), not
+        # just "for X" -- "in X" was previously missed entirely, so "how many
+        # trials in adc" fell through with an empty filter and landscaped the
+        # WHOLE unfiltered database instead of scoping to ADC.
+        m = re.search(r"\b(?:for|in|on)\s+([a-z0-9\- ]+?)(?:\s+trials?\b|\s+studies\b|$)", msg)
         if m:
             filters["target_or_moa"] = [m.group(1).strip().upper()]
         return {"intent": "landscape_or_trend", "filters": filters}
@@ -226,12 +256,169 @@ def classify_and_extract(user_message: str, working_set: dict) -> dict:
         m = re.search(r"trials? for ([a-z0-9\-]+)", msg)
         if m and m.group(1) not in known_biomarkers:
             filters["biomarkers"] = [m.group(1)]
-    if "phase 3" in msg:
-        filters["phase"] = ["Phase 3"]
-    if "recruiting" in msg:
+    # SPONSOR. This fallback previously extracted no sponsor at all, so
+    # "trials whose sponsor is Merck Sharp & Dohme LLC" searched the WHOLE
+    # database -- the constraint was silently dropped and the answer looked
+    # confidently wrong. Matched against the real sponsor_name values rather
+    # than a pattern, so any spelling the data actually uses is found.
+    _sponsors = _sponsors_in_question(user_message)
+    if _sponsors:
+        filters["sponsor"] = _sponsors
+
+    # PHASE: all four, not just Phase 3, and tolerant of "phase III" forms.
+    for _label, _pats in (
+        ("Phase 1", (r"\bphase\s*(1|i)\b", r"\bphase\s*one\b")),
+        ("Phase 2", (r"\bphase\s*(2|ii)\b", r"\bphase\s*two\b")),
+        ("Phase 3", (r"\bphase\s*(3|iii)\b", r"\bphase\s*three\b")),
+        ("Phase 4", (r"\bphase\s*(4|iv)\b", r"\bphase\s*four\b")),
+    ):
+        if any(re.search(p, msg) for p in _pats):
+            filters.setdefault("phase", []).append(_label)
+    if "recruiting" in msg or "enrolling" in msg or "open" in msg:
         filters["study_status"] = ["Recruiting"]
+    if "completed" in msg:
+        filters.setdefault("study_status", []).append("Completed")
+    requested_cols = detect_requested_columns(user_message, TRIAL_COLUMNS)
+    if requested_cols:
+        filters["columns"] = requested_cols
 
     return {"intent": "filtered_search", "filters": filters, "resolved_oncosuite_id": resolved_oncosuite_id}
+
+
+_SPONSOR_CACHE = None
+
+
+def _known_sponsors():
+    """Distinct sponsor_name values, longest first. Cached; never raises.
+
+    The vocabulary comes from the data because sponsor names are long, messy and
+    unguessable ("ArQule, Inc., a subsidiary of Merck Sharp & Dohme LLC, ...").
+    No pattern would reliably pick them out of a sentence, but comparing against
+    the real values does.
+    """
+    global _SPONSOR_CACHE
+    if _SPONSOR_CACHE is None:
+        try:
+            from db import query
+            rows = query(
+                "SELECT DISTINCT sponsor_name FROM oncosuite_gold.trial_info "
+                "WHERE sponsor_name IS NOT NULL"
+            )
+            _SPONSOR_CACHE = sorted(
+                (r["sponsor_name"] for r in rows if r["sponsor_name"]),
+                key=len, reverse=True,
+            )
+        except Exception:
+            _SPONSOR_CACHE = []
+    return _SPONSOR_CACHE
+
+
+def _sponsors_in_question(question):
+    """Every sponsor the question plausibly names, most specific first.
+
+    Returns a LIST rather than one guess. A bare "merck" legitimately refers to
+    several distinct records -- "Merck Sharp & Dohme LLC", "Merck KGaA,
+    Darmstadt, Germany" (a different company), and various subsidiaries -- so
+    picking one silently answers about the wrong company. Passing them all lets
+    the search match any of them, which is what the user meant.
+
+    An exact full-name match short-circuits: if someone types "Merck Sharp &
+    Dohme LLC" they mean that record and no other.
+    """
+    q = (question or "").lower()
+    if not q:
+        return []
+    sponsors = _known_sponsors()
+
+    # 1. Full name verbatim -- unambiguous, so return just that one. Longest
+    #    first so the fuller name wins over a shorter one inside it.
+    for name in sorted(sponsors, key=len, reverse=True):
+        if name.lower() in q:
+            return [name]
+
+    # 2. Otherwise collect every sponsor whose distinctive leading words appear.
+    matches = []
+    for name in sponsors:
+        head = re.sub(
+            r"[,(].*$", "",
+            re.sub(r"\b(inc|llc|ltd|limited|corp|corporation|gmbh|co|plc|ag|"
+                   r"nv|bv|kgaa|pharmaceuticals?|pharma)\b\.?", "",
+                   name, flags=re.IGNORECASE),
+        ).strip(" .,&-")
+        # A head of 3+ words, or a single word of 5+ chars. Shorter heads
+        # ("Bio", "Onc", "Co") match far too much to be trusted.
+        if not head or (len(head) < 5 and len(head.split()) < 2):
+            continue
+        if head.lower() in q:
+            matches.append(name)
+    # Most specific (longest) first, so a display of "matched sponsors" reads
+    # sensibly.
+    return sorted(set(matches), key=len, reverse=True)
+
+
+def _sponsor_in_question(question):
+    """Back-compat single-value form: the most specific match, or None."""
+    found = _sponsors_in_question(question)
+    return found[0] if found else None
+
+
+def _resolve_partial_trial_id(user_message, working_set):
+    """An oncosuite_id from THIS session's last results that the message refers
+    to by a fragment, or None.
+
+    Users identify a row by whatever part of it they can see: "starts with wd7",
+    "the wD7 one", "wD7-VqO". None of those is a full 3-3-3 id, so the strict
+    pattern misses them and the question falls through to an unfiltered search --
+    which silently answers about the whole database instead of the row they
+    pointed at.
+
+    Deliberately conservative:
+      * only fragments of 3+ alphanumerics are considered, so short filler words
+        cannot match;
+      * the fragment must match the START of exactly ONE remembered id. Two
+        candidates means the reference is genuinely ambiguous, and guessing
+        would answer about the wrong trial.
+    """
+    remembered = (working_set or {}).get("last_trials") or []
+    if not remembered:
+        return None
+    ids = [t.get("oncosuite_id") for t in remembered if t.get("oncosuite_id")]
+    if not ids:
+        return None
+
+    # Candidate fragments from the message: alphanumeric runs, plus dash-joined
+    # groups so a half-typed id ("wD7-VqO") is treated as one token.
+    text = str(user_message or "")
+    fragments = re.findall(r"[0-9A-Za-z]{3,}(?:-[0-9A-Za-z]{3,})*", text)
+    # Longest first: "wD7-VqO" is a stronger signal than "wD7".
+    # Ordinary English words must never be treated as id fragments -- "the",
+    # "give", "trial" would match ids by accident. An id group is 3 characters of
+    # mixed case/digits, so a fragment qualifies when it is dash-joined, contains
+    # a digit, OR mixes upper and lower case ("rvE", "FFi", "VqO"). That last
+    # test is what lets an all-letter group work without opening the door to
+    # lowercase prose.
+    _WORDS = {"the", "and", "for", "give", "show", "trial", "trials", "from",
+              "above", "with", "one", "specific", "which", "starts", "start",
+              "oncosuite", "oid", "list", "all", "what", "that", "this", "there",
+              "them", "please", "want", "need", "get", "see", "find", "about"}
+    for frag in sorted(set(fragments), key=len, reverse=True):
+        f = frag.lower()
+        if f in _WORDS:
+            continue
+        # An all-lowercase fragment ("acg") is allowed too: the real protection is
+        # that it must match exactly ONE remembered id, and the stop-word list
+        # above removes the words that would otherwise collide. Verified against
+        # ordinary questions -- none of their words appear inside a real id.
+        matches = [i for i in ids if i.lower().startswith(f)]
+        if len(matches) == 1:
+            return matches[0]
+        # Also allow a fragment appearing anywhere in the id ("VqO"), still
+        # requiring a unique hit.
+        if not matches:
+            contained = [i for i in ids if f in i.lower()]
+            if len(contained) == 1:
+                return contained[0]
+    return None
 
 
 def should_escalate(intent, tool_result, unmatched_terms):
@@ -264,8 +451,54 @@ def _text_to_sql_response(user_message):
         import text_to_sql
     except Exception:
         return None
+
+    # LEARNING -- REPLAY. If this question (or a rewording of it) was answered
+    # before, run that PROVEN SQL instead of asking the model to write it again.
+    # Faster, and strictly more reliable: a query that returned rows beats a
+    # fresh guess. A replay that has since broken is un-learned so it is not
+    # retried forever.
+    try:
+        import agent_learning
+        learned = agent_learning.recall_query(user_message, kind="sql")
+    except Exception:
+        agent_learning, learned = None, None
+    if learned and isinstance(learned.get("payload"), str):
+        try:
+            from db import query as _q
+            rows = _q(learned["payload"])
+            if rows:
+                answer = None
+                try:
+                    answer = text_to_sql.answer_from_rows(
+                        user_message, learned["payload"], rows)
+                except Exception:
+                    pass
+                return {
+                    "intent": "text_to_sql", "tool_name": "text_to_sql",
+                    "escalate": True, "response_mode": "text_to_sql",
+                    "tool_result": {"rows": rows, "sql": learned["payload"]},
+                    "synthesis": ({"text": answer, "mode": "llm"} if answer
+                                  else None),
+                    "sql": learned["payload"],
+                    "ts_status": "answered",
+                    "replayed_from_memory": True,
+                }
+            agent_learning.forget_query(user_message, "sql")
+        except Exception:
+            if agent_learning:
+                agent_learning.forget_query(user_message, "sql")
+
     result = text_to_sql.run(user_message)
     if result.get("status") == "answered":
+        # LEARNING -- STORE. Only the SQL and its row count: verifiable facts,
+        # never the model's prose (see agent_learning's module docstring).
+        try:
+            if agent_learning and result.get("sql"):
+                agent_learning.remember_query(
+                    user_message, "sql", result["sql"],
+                    len(result.get("rows") or []))
+        except Exception:
+            pass
         return {
             "intent": "text_to_sql", "tool_name": "text_to_sql", "escalate": True,
             "response_mode": "text_to_sql",
@@ -337,6 +570,17 @@ def _vector_search_response(user_message):
     }
 
 
+def _try_sql_then_vector(user_message):
+    """The 'try text-to-SQL, then semantic search' cascade shared by the
+    aggregate_query and out_of_scope branches below: whichever answers first
+    wins, or None if neither could. Each caller keeps its own final fallback
+    response when this returns None."""
+    ts = _text_to_sql_response(user_message)
+    if ts is not None:
+        return ts
+    return _vector_search_response(user_message)
+
+
 def _cohort_list_response(user_message, classification, on_step=None):
     """Cohort-level answer per the client's spec: 'N cohorts within M trials' + a
     table (OncoSuite ID | Indication | Regimen | Phase | Status), clickable rows,
@@ -358,7 +602,7 @@ def _cohort_list_response(user_message, classification, on_step=None):
     filters = dict(classification.get("filters", {}) or {})
     filters.pop("nct_id", None)
     _cohort_keys = ("drug_name_or_target", "condition", "biomarkers",
-                    "line_of_therapy", "phase", "study_status")
+                    "line_of_therapy", "phase", "study_status", "columns")
     kwargs = {k: filters[k] for k in _cohort_keys if filters.get(k)}
     # If the classifier gave no usable filters (it's an LLM call and is
     # non-deterministic -- it sometimes labels "list all ADC cohorts" as
@@ -370,7 +614,12 @@ def _cohort_list_response(user_message, classification, on_step=None):
         dc = extract_drug_class(user_message)
         if dc:
             kwargs["drug_name_or_target"] = dc
-    if not kwargs:
+    if not kwargs.get("columns"):
+        requested_cols = detect_requested_columns(user_message, COHORT_COLUMNS)
+        if requested_cols:
+            kwargs["columns"] = requested_cols
+    scoping_keys = [k for k in kwargs if k != "columns"]
+    if not scoping_keys:
         return None  # nothing to scope a cohort search on -> let normal cascade run
 
     step("Pulling relevant data from the trials")
@@ -421,7 +670,7 @@ def _full_search_response(session_id, filters, on_step=None):
 
     _sessions.update_after_tool_call(session_id, "search_trials", tool_result)
 
-    synthesis = _render_trial_page(results, total, filters)
+    synthesis = _render_trial_page(results, total, filters, tool_result.get("columns"))
     _record_answer(session_id, synthesis)
     return {
         "intent": "filtered_search", "tool_name": "search_trials",
@@ -503,9 +752,59 @@ def _same_search_response(session_id, lm, classification, working_set, on_step=N
     return resp
 
 
-def _render_trial_page(results, total, filters):
+def _render_trial_comparison(cmp_result):
+    """Markdown side-by-side comparison of two or more trials.
+
+    Deterministic: every cell comes from compare_trials, which copies from
+    get_trial_detail. The "what differs" list is the point of the answer -- a
+    table alone still leaves the reader to diff two columns by eye.
+    """
+    trials = cmp_result.get("trials") or []
+    rows = cmp_result.get("rows") or []
+    if not trials or not rows:
+        return {"text": "**Nothing to compare.**", "mode": "deterministic"}
+
+    def _label(t):
+        oid = t.get("oncosuite_id") or "—"
+        nct = t.get("nct_id")
+        return f"{oid}" + (f" ({nct})" if nct else "")
+
+    lines = [f"**Comparing {len(trials)} trials**", ""]
+    for t in trials:
+        title = (t.get("title") or "").strip()
+        lines.append(f"- **{_label(t)}**" + (f" — {title}" if title else ""))
+    lines.append("")
+
+    header = "| Field | " + " | ".join(_label(t) for t in trials) + " |"
+    lines.append(header)
+    lines.append("|" + "---|" * (len(trials) + 1))
+    for row in rows:
+        lines.append(f"| {row['label']} | " + " | ".join(row["values"]) + " |")
+
+    diffs = cmp_result.get("differences") or []
+    if diffs:
+        lines += ["", "**Where they differ**", ""]
+        lines += [f"- {d}" for d in diffs]
+
+    shared = cmp_result.get("shared_countries") or []
+    if shared:
+        lines += ["", f"**Countries in common ({len(shared)})**: "
+                      + ", ".join(shared[:12])
+                      + (" …" if len(shared) > 12 else "")]
+
+    unresolved = cmp_result.get("unresolved") or []
+    if unresolved:
+        lines += ["", "_Not included (id not recognised): "
+                      + ", ".join(unresolved) + "._"]
+
+    return {"text": "\n".join(lines), "mode": "deterministic"}
+
+
+def _render_trial_page(results, total, filters, columns=None):
     """Deterministic tabular render of EVERY matching trial. No LLM needed:
-    every value is copied straight from the tool result."""
+    every value is copied straight from the tool result. Columns are whatever
+    search_trials actually returned (column_catalog.TRIAL_COLUMNS keys) rather
+    than a hardcoded set, so a query that asked for extra detail renders it."""
     if not results:
         return {"text": "**No trials matched.**\nThere are no trials for these filters.",
                 "mode": "deterministic", "table_data": []}
@@ -516,26 +815,15 @@ def _render_trial_page(results, total, filters):
     # header just needs to hold up on its own if ever shown standalone.
     scope = " (filtered)" if filters else ""
     header = f"**Every matching trial{scope}: {total} total**"
+    from column_catalog import trial_markdown_table
+    keys = list(columns or [])
     # "reported_outcomes" only exists when the search was filtered by
     # search_trials' reported_outcomes param (e.g. "have OS/ORR/PFS reported")
     # -- shown as its own column so it's visible WHICH of the requested
     # metrics each row actually has, not just that the search was narrowed.
-    has_reported = any(r.get("reported_outcomes") for r in results)
-    cols = ["#", "NCT ID", "Trial", "Phase", "Status", "Sponsor", "Enrollment"]
-    if has_reported:
-        cols.append("Reported Outcomes")
-    lines = [header, "",
-             "| " + " | ".join(cols) + " |",
-             "|" + "---|" * len(cols)]
-    for i, r in enumerate(results, start=1):
-        title = (r.get("title") or "")[:80]
-        row = (
-            f"| {i} | {r.get('nct_id') or '—'} | {title} | {r.get('phase') or '—'} "
-            f"| {r.get('status') or '—'} | {r.get('sponsor') or '—'} | {r.get('enrollment') or '—'}"
-        )
-        if has_reported:
-            row += f" | {r.get('reported_outcomes') or '—'}"
-        lines.append(row + " |")
+    if any(r.get("reported_outcomes") for r in results) and "reported_outcomes" not in keys:
+        keys.append("reported_outcomes")
+    lines = [header, ""] + trial_markdown_table(results, keys)
     lines.append("")
     lines.append(f"_All {total} matching trial(s)._")
 
@@ -637,7 +925,10 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
     # you". These have no data behind them, so without this branch they fall all the
     # way through the cascade and surface the out-of-scope card, which reads as a
     # failure. Match the WHOLE message so "hi" never fires on "which trials...".
-    _greet = user_message.strip().lower().strip("!.?,")
+    # Strip ANY surrounding punctuation/symbols, not a hand-picked few: a stray
+    # keystroke ("hi\", "hi/") otherwise slipped past this branch and fell all
+    # the way through to a full trial search.
+    _greet = re.sub(r"^\W+|\W+$", "", user_message.strip().lower())
     _GREETINGS = {
         "hi", "hii", "hey", "hello", "yo", "hiya", "good morning",
         "good afternoon", "good evening", "greetings", "hi there", "hello there",
@@ -666,8 +957,66 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
     # NCT number OR an internal oncosuite id (3-3-3 alphanumeric, e.g. "00v-vw5-Ejz")
     # is an unambiguous single-trial request. Handle it directly so it never gets
     # swallowed by the conceptual-RAG gate or a fuzzy LLM classification.
-    _nct = re.search(r"nct\d{8}", user_message, re.IGNORECASE)
-    _onco = re.search(r"\b([0-9A-Za-z]{3}-[0-9A-Za-z]{3}-[0-9A-Za-z]{3})\b", user_message)
+    _nct = _NCT_ID_RE.search(user_message)
+    _onco = _ONCOSUITE_ID_RE.search(user_message)
+
+    # TWO-TRIAL COMPARISON. Two or more ids plus a comparison cue is a request to
+    # compare those trials WITH EACH OTHER -- not the same thing as compare_arms,
+    # which compares arms within one trial. This must run before the single-id
+    # override below, which uses .search() and would answer about the first id
+    # only, presenting half the answer as if it were complete.
+    _all_onco = _ONCOSUITE_ID_RE.findall(user_message)
+    _all_nct = _NCT_ID_RE.findall(user_message)
+    _ids = list(dict.fromkeys(_all_onco + [n.upper() for n in _all_nct]))
+    # Own lowercase copy: _lm is not defined until after classification below.
+    if len(_ids) >= 2 and re.search(
+            r"\b(compare|comparison|versus|vs\.?|difference|differ|against|"
+            r"side by side)\b", user_message.lower()):
+        _step(f"Comparing {len(_ids)} trials side by side")
+        from tools.compare_trials import compare_trials
+        _cmp = compare_trials(_ids)
+        if not _cmp.get("error"):
+            # Rendered deterministically: every cell is copied from
+            # get_trial_detail, so no LLM call is needed and the table cannot
+            # disagree with the data. (It also keeps working while the model
+            # backend is unavailable.)
+            synthesis = _render_trial_comparison(_cmp)
+            _record_answer(session_id, synthesis)
+            return {"intent": "trial_comparison", "tool_name": "compare_trials",
+                    "escalate": True,
+                    "response_mode": "strong_model_synthesis",
+                    "tool_result": _cmp, "synthesis": synthesis}
+        # Couldn't resolve enough ids -> say so rather than silently comparing one.
+        _syn = {"text": _cmp["error"], "mode": "direct"}
+        _record_answer(session_id, _syn)
+        return {"intent": "trial_comparison", "escalate": False,
+                "response_mode": "greeting", "synthesis": _syn}
+
+    # PARTIAL id against what this session was just shown. People refer to a row
+    # by the part they can see or be bothered to type -- "the one starting wd7",
+    # "from the above, wD7-VqO" -- which is not a full 3-3-3 id, so the pattern
+    # above misses it and the turn used to fall through to an UNFILTERED search
+    # (the observed bug: a follow-up on 25 AstraZeneca trials returned all 1,562).
+    # Resolve it against last_trials, which holds exactly the rows on screen.
+    if not (_nct or _onco):
+        _partial = _resolve_partial_trial_id(user_message, working_set)
+        if _partial:
+            _step(f"Matched {_partial} from the trials just shown")
+            _cls = {"intent": "single_trial_lookup",
+                    "filters": {"oncosuite_id": _partial}}
+            tool_name, tool_result = _dispatch_tool(_cls, working_set)
+            if not (isinstance(tool_result, dict) and tool_result.get("error")
+                    and not tool_result.get("oncosuite_id")):
+                _sessions.update_after_tool_call(session_id, tool_name, tool_result)
+                from synthesis import synthesize
+                synthesis = synthesize(user_message, "single_trial_lookup",
+                                       tool_name, tool_result, history=_history)
+                _record_answer(session_id, synthesis)
+                return {"intent": "single_trial_lookup", "tool_name": tool_name,
+                        "escalate": True,
+                        "response_mode": "strong_model_synthesis",
+                        "tool_result": tool_result, "synthesis": synthesis}
+
     if _nct or _onco:
         _step("Detected a trial ID — looking it up directly")
         _cls = {"intent": "single_trial_lookup",
@@ -693,6 +1042,22 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
     classification = classify_and_extract(user_message, working_set)
     intent = classification["intent"]
     _step(f"Classified your question as a {intent.replace('_', ' ')}")
+
+    # LEARNING -- REPLAY (filters). The classifier is an LLM call and is
+    # non-deterministic: the same question can come back with filters one turn
+    # and {} the next, and an empty filter set silently widens the search to the
+    # whole database (the bug behind "sponsor is Merck" returning 1,562 trials).
+    # If we have proven filters for this question, use them rather than search
+    # unscoped.
+    if not (classification.get("filters") or {}):
+        try:
+            import agent_learning
+            _learned = agent_learning.recall_query(user_message, kind="filters")
+            if _learned and isinstance(_learned.get("payload"), dict):
+                classification["filters"] = dict(_learned["payload"])
+                _step("Reusing filters that answered this question before")
+        except Exception:
+            pass
 
     # GUARDRAIL: honor sponsor exclusions ("not interested in academia"). Inject the
     # exclusion into the filters so it flows into search_trials/landscape via dispatch.
@@ -750,6 +1115,33 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
     if _ss is not None:
         return _ss
 
+    # "DO ANY OF THESE HAVE PUBLISHED RESULTS?" -- a follow-up about the set
+    # already on screen. No search tool answers it: search_trials reports what
+    # MATCHES filters, not which matches have outcome values behind them. So the
+    # question fell through to an unscoped search, and once that was guarded, to
+    # "I couldn't work out what to search for".
+    #
+    # Resolved against last_trials (what the user was just shown) rather than
+    # re-searching, because "in these 9 trials" refers to those exact rows.
+    if re.search(r"\b(publish|posted|reported|available)\w*\b", _lm) and re.search(
+            r"\b(result|outcome|data|readout)\w*\b", _lm):
+        _prior = [t.get("oncosuite_id") for t in (working_set.get("last_trials") or [])
+                  if t.get("oncosuite_id")]
+        if _prior:
+            _step(f"Checking posted results for {len(_prior)} trials")
+            from tools.check_posted_results import (check_posted_results,
+                                                    narrate_posted_results)
+            _pr = check_posted_results(_prior)
+            _nb = narrate_posted_results(_pr)
+            if _nb:
+                _syn = {"text": "\n\n".join(
+                    b["text"] for b in _nb if b["type"] == "intro"), "mode": "deterministic"}
+                _record_answer(session_id, _syn)
+                return {"intent": "posted_results_check", "escalate": False,
+                        "response_mode": "posted_results",
+                        "tool_result": _pr, "narration": _nb,
+                        "synthesis": _syn}
+
     # LANDSCAPE / PORTFOLIO questions -> get_competitive_landscape (the tool that
     # produces the drug + phase breakdown CHARTS). This must run BEFORE the conceptual
     # RAG gate, otherwise "how are EGFR NSCLC cases related to active trials from
@@ -763,7 +1155,7 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
         "industry-sponsored", "by sponsor", "by phase", "by drug",
         "development activity", "where is industry", "who is developing",
     )
-    _is_landscape = any(c in _lm for c in _LANDSCAPE_CUES) and not re.search(r"nct\d{8}", _lm)
+    _is_landscape = any(c in _lm for c in _LANDSCAPE_CUES) and not _NCT_ID_RE.search(_lm)
     if _is_landscape and intent not in ("single_trial_lookup", "arm_comparison"):
         _step("Building the competitive landscape (drug × phase breakdown)")
         filters = classification.get("filters", {}) or {}
@@ -773,10 +1165,19 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
             if "nsclc" in _lm or "lung" in _lm:
                 cond = ["lung"]
         group_by = ["drug_name", "phase"]
+        # `target_or_moa` is only populated when the classifier itself picked
+        # "landscape_or_trend" (llm_classifier.classify's own key-rename for
+        # that intent). This block also fires for OTHER intents purely on
+        # landscape-cue keywords ("how many trials" -> often filtered_search,
+        # per the classifier's own bare-count rule) -- those carry the same
+        # drug/target/modality term under "drug_name_or_target" instead, so
+        # fall back to it or a real filter like ADC silently becomes "no
+        # filter" and landscapes the whole unfiltered database.
+        target_or_moa = filters.get("target_or_moa") or filters.get("drug_name_or_target")
         ls = get_competitive_landscape(
             group_by=group_by,
             condition=cond,
-            target_or_moa=filters.get("target_or_moa"),
+            target_or_moa=target_or_moa,
             exclude_sponsor_type=filters.get("exclude_sponsor_type"),
         )
         if ls and ls.get("groups"):
@@ -809,7 +1210,7 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
     )
     _is_conceptual = (
         any(c in _lm for c in _CONCEPTUAL_CUES)
-        and not re.search(r"nct\d{8}", _lm)
+        and not _NCT_ID_RE.search(_lm)
         and not any(c in _lm for c in _EXACT_OR_AGG_CUES)
     )
     if _is_conceptual:
@@ -828,9 +1229,33 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
                    "and compare", "and detail", "and then compare", "similar to",
                    "and rank", "and find", "for each of")
     _ACTION_VERBS = ("compare", "detail", "rank", "find", "search", "list", "similar")
+
+    # COMPARATIVE questions are the second multi-step shape, and the original
+    # gate missed them entirely: "compare osimertinib trials with chemo trials"
+    # names one verb and no chaining cue, yet answering it needs two searches and
+    # a comparison. Requiring a cue AND two verbs let these fall through to a
+    # single tool that can only answer half the question.
+    #
+    # Safe to match "vs" here: detect_analytics() runs BEFORE the router (see
+    # web_app.py) and already claims the chart questions that use it -- "efficacy
+    # vs safety", "competition intensity vs enrollment speed" -- so they never
+    # reach this gate.
+    _COMPARATIVE_PATTERNS = (
+        r"\bcompare[sd]?\b.*\b(with|to|vs\.?|versus|against)\b",
+        r"\bhow (do|does|did)\b.*\b(compare|differ|stack up|perform)\b",
+        r"\b(vs\.?|versus)\b",
+        r"\bdiffer(ence|ences|s)?\b.*\bbetween\b",
+        r"\band how\b.*\b(differ|compare)\b",
+        r"\bacross\b.*\b(phases?|countries|countr|sponsors?|lines?|stages?)\b",
+    )
+    _is_comparative = any(re.search(p, _lm) for p in _COMPARATIVE_PATTERNS)
+
     _is_multistep = (
+        # A chaining cue alone is enough now: "find X then compare" is plainly
+        # two steps whether or not a second verb happens to appear.
         any(c in _lm for c in _CHAIN_CUES)
-        and sum(1 for v in _ACTION_VERBS if v in _lm) >= 2
+        or sum(1 for v in _ACTION_VERBS if v in _lm) >= 2
+        or _is_comparative
     )
     if _is_multistep:
         try:
@@ -845,19 +1270,9 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
     # Portfolio-level aggregate -> text-to-SQL (counts/groupings/breakdowns the fixed
     # tools can't do). If the fallback can't answer, fall through to out-of-scope.
     if intent == "aggregate_query":
-        ts = _text_to_sql_response(user_message)
-        if ts is not None:
-            return ts
-        # SQL couldn't answer -> semantic/RAG search over the embedded trials.
-        vs = _vector_search_response(user_message)
-        if vs is not None:
-            return vs
-        # Every data path exhausted -> general knowledge, clearly disclaimed.
-        gk = _general_knowledge_response(user_message, _history, on_step)
-        if gk is not None:
-            _record_answer(session_id, gk)
-            return {"intent": intent, "escalate": False,
-                    "response_mode": "general_knowledge", "synthesis": gk}
+        resp = _try_sql_then_vector(user_message)
+        if resp is not None:
+            return resp
         return {
             "intent": intent, "escalate": False,
             "response_mode": "out_of_scope_policy_needed",
@@ -867,19 +1282,23 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
     if intent == "out_of_scope":
         # Before rejecting, try the text-to-SQL fallback -- the data may well be in the
         # DB even though no hardcoded rule matched the phrasing.
-        ts = _text_to_sql_response(user_message)
-        if ts is not None:
-            return ts
-        # SQL couldn't answer -> semantic/RAG search over the embedded trials.
-        vs = _vector_search_response(user_message)
-        if vs is not None:
-            return vs
-        # Every data path exhausted -> general knowledge, clearly disclaimed.
-        gk = _general_knowledge_response(user_message, _history, on_step)
-        if gk is not None:
-            _record_answer(session_id, gk)
-            return {"intent": intent, "escalate": False,
-                    "response_mode": "general_knowledge", "synthesis": gk}
+        resp = _try_sql_then_vector(user_message)
+        if resp is not None:
+            return resp
+        # Every data path is now exhausted, which is exactly the contract
+        # _general_knowledge_response documents. A definition question ("what is
+        # NSCLC") has no rows behind it by nature, and refusing it reads as a
+        # failure when the assistant plainly knows the answer -- so answer from
+        # general knowledge, clearly labelled as NOT coming from the database.
+        _syn = _general_knowledge_response(user_message, _history, on_step)
+        if _syn is not None:
+            _record_answer(session_id, _syn)
+            return {
+                "intent": intent,
+                "escalate": False,
+                "response_mode": "general_knowledge",
+                "synthesis": _syn,
+            }
         return {
             "intent": intent,
             "escalate": False,
@@ -889,11 +1308,57 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
                      "ask about trials, sponsors, phases, drugs, or endpoints."),
         }
 
+    # DON'T ANSWER A QUESTION WE DIDN'T UNDERSTAND.
+    #
+    # A filtered_search with NO filters searches the entire database, and the
+    # renderer then presents all 1,562 trials as though they were the answer.
+    # That is how "show me the efrficacy vgs safety" came back as a generic trial
+    # list: nothing matched, the classifier fell through to filtered_search with
+    # {}, and an unscoped dump looked like a confident reply.
+    #
+    # An unscoped list is only legitimate when the user actually ASKED for
+    # everything ("show all trials"), so require that phrasing; otherwise say
+    # plainly that the question wasn't understood.
+    if (intent == "filtered_search"
+            and not any(v for k, v in (classification.get("filters") or {}).items()
+                        if k != "columns")
+            and not any(c in _lm for c in _SHOW_ALL_CUES)):
+        _syn = {
+            "text": (
+                "I couldn't work out what to search for in that question.\n\n"
+                "Could you rephrase it, or name what you're after — a condition, "
+                "biomarker, sponsor, phase, or a trial id? For example:\n\n"
+                "- *efficacy vs safety*\n"
+                "- *top backbones for phase 2*\n"
+                "- *trials sponsored by AstraZeneca*\n"
+                "- *show all trials* (if you did want the full list)"
+            ),
+            "mode": "direct",
+        }
+        _record_answer(session_id, _syn)
+        return {"intent": "clarification_needed", "escalate": False,
+                "response_mode": "greeting", "synthesis": _syn}
+
     _step("Searching the trial database")
     tool_name, tool_result = _dispatch_tool(classification, working_set)
     unmatched_terms = tool_result.get("unmatched_terms", []) if isinstance(tool_result, dict) else []
     if isinstance(tool_result, dict) and "total_matches" in tool_result:
         _step(f"Found {tool_result['total_matches']} matching trial(s)")
+
+    # LEARNING. Record what worked, so a later rewording of this question reuses
+    # the same filters, and so the session profile reflects what this user keeps
+    # asking about. Both are best-effort -- wrapped because a learning failure
+    # must never cost the user their answer.
+    try:
+        import agent_learning
+        _f = classification.get("filters") or {}
+        _matches = (tool_result.get("total_matches")
+                    if isinstance(tool_result, dict) else None)
+        if _f and _matches:
+            agent_learning.remember_query(user_message, "filters", _f, _matches)
+        agent_learning.remember_entities(session_id, _f, user_message)
+    except Exception:
+        pass
 
     # Route to text-to-SQL when the fixed search tool can't actually answer the question:
     #  (a) it extracted NO real filters (classifier didn't understand it), or
@@ -908,16 +1373,10 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
     # so the answer gets a real table + insights instead of a bare number with no way
     # to see what was counted. Only escalate a bare count to SQL when there's nothing
     # concrete to count (no filters at all).
+    from llm_classifier import _TRUE_AGG_WORDS
+
     _filters = classification.get("filters", {})
     _msg = user_message.lower()
-    _TRUE_AGG_WORDS = ("average", "avg", "mean", "median", "sum",
-                       "most", "least", "fewest",
-                       "highest", "lowest", "top ", "rank", "group by", "per ",
-                       "distribution", "breakdown", "percentage", "proportion", "ratio",
-                       # comparative / analytic phrasings the fixed search tool can't do
-                       "more often", "less often", "compare", "comparison", "relationship",
-                       "correlat", "fraction of", "similar to", "vs ", "versus", "than ",
-                       "each ", "across all", "trend")
     _COUNT_WORDS = ("how many", "count", "number of", "total number")
     _has_filters = any(v for v in _filters.values())
     _wants_true_aggregate = any(w in _msg for w in _TRUE_AGG_WORDS)
@@ -1041,9 +1500,17 @@ def _dispatch_tool(classification, working_set):
             # User gave an INTERNAL oncosuite id. Confirm it exists, look up the linked
             # NCT id, and attach an id_note so the answer can tell the user what they
             # gave and which public NCT it maps to (per product requirement).
-            exists = query("SELECT 1 FROM oncosuite_gold.trial_info WHERE oncosuite_id = %(id)s",
-                           {"id": onco})
-            if not exists:
+            # Case-insensitive: these ids mix cases and are read off a screen, and
+            # some characters are visually identical in common fonts -- a capital
+            # I against a lowercase l is how "kF6-oN3-If3" gets typed as
+            # "kF6-oN3-lf3". Exact matching rejected a real trial as unrecognised.
+            from tools.get_trial_detail import resolve_oncosuite_id
+            _resolved = resolve_oncosuite_id(onco)
+            if _resolved:
+                # Use the STORED spelling from here on, so every downstream
+                # exact-match query still works.
+                onco = _resolved
+            if not _resolved:
                 return "get_trial_detail", {
                     "error": (f"'{onco}' is not a trial id I recognise. It looks like an "
                               "internal OncoSuite id but no trial matches it. Please check "
@@ -1069,22 +1536,25 @@ def _dispatch_tool(classification, working_set):
     if intent == "arm_comparison":
         from db import query as _q
 
+        def _resolve_arms_and_compare(onco_id):
+            resolved_arms = _q(
+                "SELECT a.arm_id FROM oncosuite_gold.arms_info a "
+                "JOIN oncosuite_gold.cohort_info c ON c.cohort_id = a.cohort_id "
+                "WHERE c.oncosuite_id = %(id)s",
+                {"id": onco_id},
+            )
+            aids = [r["arm_id"] for r in resolved_arms]
+            if aids:
+                return "compare_arms", compare_arms(onco_id, aids)
+            return "compare_arms", {"error": f"trial {onco_id} has no arms recorded to compare"}
+
         # 1. Already have an explicit trial + arms from session context -> use them.
         if oncosuite_id and arm_ids:
             return "compare_arms", compare_arms(oncosuite_id, arm_ids)
 
         # 2. A trial is active but arms weren't captured -> pull that trial's arms.
         if oncosuite_id and not arm_ids:
-            resolved_arms = _q(
-                "SELECT a.arm_id FROM oncosuite_gold.arms_info a "
-                "JOIN oncosuite_gold.cohort_info c ON c.cohort_id = a.cohort_id "
-                "WHERE c.oncosuite_id = %(id)s",
-                {"id": oncosuite_id},
-            )
-            aids = [r["arm_id"] for r in resolved_arms]
-            if aids:
-                return "compare_arms", compare_arms(oncosuite_id, aids)
-            return "compare_arms", {"error": f"trial {oncosuite_id} has no arms recorded to compare"}
+            return _resolve_arms_and_compare(oncosuite_id)
 
         # 3. No trial in session, but the user DESCRIBED one ("the Phase 3 lung
         #    cancer trial"). Resolve it from the extracted filters via search.
@@ -1105,17 +1575,7 @@ def _dispatch_tool(classification, working_set):
             total = found.get("total_matches", 0)
 
             if total == 1 or len(results) == 1:
-                rid = results[0]["oncosuite_id"]
-                resolved_arms = _q(
-                    "SELECT a.arm_id FROM oncosuite_gold.arms_info a "
-                    "JOIN oncosuite_gold.cohort_info c ON c.cohort_id = a.cohort_id "
-                    "WHERE c.oncosuite_id = %(id)s",
-                    {"id": rid},
-                )
-                aids = [r["arm_id"] for r in resolved_arms]
-                if aids:
-                    return "compare_arms", compare_arms(rid, aids)
-                return "compare_arms", {"error": f"trial {rid} has no arms recorded to compare"}
+                return _resolve_arms_and_compare(results[0]["oncosuite_id"])
 
             if total > 1:
                 # Ambiguous -> ask the user to pick, listing a few candidates.

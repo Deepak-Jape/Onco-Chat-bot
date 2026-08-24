@@ -66,8 +66,15 @@ def linkify_trial_ids(html: str) -> str:
 
 def _wrap_id(m):
     ident = m.group(1)
+    # The tooltip has to match where the click actually goes (see App.jsx's
+    # onServerAnswerClick): an NCT number opens its ClinicalTrials.gov record,
+    # an OncoSuite id opens our own summary drawer. One shared label was
+    # promising an executive summary for both.
+    is_nct = bool(re.fullmatch(r"NCT\d{8}", ident, re.IGNORECASE))
+    title = ("Open on ClinicalTrials.gov" if is_nct
+             else "Open executive summary")
     return (f'<button type="button" class="trial-link" '
-            f'data-trial-id="{ident}" title="Open executive summary">{ident}</button>')
+            f'data-trial-id="{ident}" title="{title}">{ident}</button>')
 
 
 # Analytics questions answer straight from the analytics schema. The router
@@ -87,27 +94,71 @@ _ANALYTICS_CUES = (
         r"\b(orr|response rate)\b.*\b(safety|toxicity|ae|sae)\b",
         r"\b(safety|toxicity)\b.*\b(orr|response rate)\b",
     )),
+    # Route of administration -- checked first because "oral"/"IV" questions
+    # carry no other cue that would match.
+    ("ModeOfAdministration", (
+        r"mode\s+of\s+administration", r"route\s+of\s+administration",
+        r"\b(administered|administration)\b",
+        r"\b(intravenous|subcutaneous|per\s*oral|intramuscular|intratumoral)\b",
+        r"\b(iv|po|sc|im)\s+(vs\.?|versus)\s+\w+",
+    )),
+    # Biomarkers / molecular targets, before the backbone cues so a question
+    # naming EGFR opens the biomarker panel rather than the backbone one.
+    ("TopBiomarkers", (
+        r"\btop\s+(biomarker|target)", r"\bbiomarker",
+        r"\btop\s+targets?\b", r"\bmolecular\s+target",
+    )),
+    # Checked BEFORE TreatmentStrategiesTable: these ask WHICH backbones /
+    # mechanisms dominate (or want them split by phase), which is the phase-bar
+    # chart -- ctsearch's own Top Backbones panel. The table below answers the
+    # narrower "list the strategies" ask.
+    ("TopBackbones", (
+        r"\btop\s+(backbone|moa|mechanism|drug|drug\s*class)",
+        r"\b(backbone|mechanism[s]?\s+of\s+action|\bmoa\b|drug\s*class)\b"
+        r".*\bby\s+phase\b",
+        r"\bby\s+phase\b.*\b(backbone|mechanism|moa|drug\s*class)",
+        # Either order: "most common backbones" and "which backbones are most
+        # common" are the same question.
+        r"\b(most|which)\b.*\b(backbone|mechanism|moa|drug\s*class|regimen)",
+        r"\b(backbone|mechanism|moa|drug\s*class)\b.*\bdistribution\b",
+    )),
     ("TreatmentStrategiesTable", (
         r"mechanism[s]?\s+of\s+action", r"\bmoa\b", r"treatment strateg",
         r"\bmodalit", r"\bbackbone\b",
     )),
+    # The chart owns "competition intensity" and "enrollment/recruitment speed"
+    # outright -- either concept alone is enough. Two earlier problems:
+    #   * the patterns required BOTH concepts in one regex, so a typo in either
+    #     half ("competition intsity vs enrollment speed") fell through; and
+    #   * FeasibilityTable/CompetitionTable below also claimed those phrases and
+    #     were listed FIRST, so detect_analytics -- which returns the first
+    #     match in tuple order -- answered with a table instead of the chart.
+    # `intensity` is matched loosely (`int\w*sity`) because it is the word users
+    # most often mistype. The tables keep only the phrases unique to them.
+    # Checked BEFORE CompetitionVsEnrollment: "amendment risk vs enrollment
+    # speed" names both concepts, and amendment is the more specific signal --
+    # otherwise the enrollment-speed pattern below claims it.
+    ("AmendmentRisk", (
+        r"amendment", r"protocol change",
+    )),
     ("CompetitionVsEnrollment", (
-        r"competition intensity.*(enrol|recruit)", r"(enrol|recruit).*competition intensity",
+        r"compet\w*\s+int\w*sity", r"competitive\s+int\w*sity",
+        r"\bcompetition\b.*\bcountr",
+        r"(enrol|enroll|recruit)\w*\s+speed",
+        r"speed\s+of\s+(enrol|enroll|recruit)",
     )),
     ("TrialDurationByCountry", (
         r"trial duration", r"how long.*trial", r"study start[- ]?up.*countr",
         r"duration by country",
     )),
-    ("AmendmentRisk", (
-        r"amendment", r"protocol change",
-    )),
     ("FeasibilityTable", (
         r"\bfeasibilit", r"start[- ]?up", r"recruitment window",
-        r"enrollment speed", r"enrolment speed",
     )),
     ("CompetitionTable", (
-        r"competition intensity", r"competitive intensity",
-        r"\bcompetition\b.*\bcountr", r"recruitment speed",
+        # Only the explicit "as a table" ask -- the bare concepts now go to the
+        # chart above.
+        r"competit\w*.*\b(table|rows|list)\b",
+        r"\b(table|rows|list)\b.*competit\w*",
     )),
 )
 
@@ -118,6 +169,20 @@ def detect_analytics(question: str):
     for name, patterns in _ANALYTICS_CUES:
         if any(re.search(p, q) for p in patterns):
             return name
+
+    # No keyword matched, but the question may name a biomarker, target or route
+    # of administration outright ("HER2 trials", "EGFR in phase 2"). Those are
+    # only recognisable against the real vocabulary, so this check is last --
+    # after every explicit cue has had its say.
+    try:
+        from analytics_data import biomarkers_from_question
+        named = biomarkers_from_question(question)
+        if named.get("mode"):
+            return "ModeOfAdministration"
+        if named.get("biomarker") or named.get("target"):
+            return "TopBiomarkers"
+    except Exception:
+        pass
     return None
 
 
@@ -145,7 +210,13 @@ _MAP_CUES = (
     # the trial-site PopulationMap. Listed as its own entry (not folded into
     # _EPIDEMIOLOGY_CUES's tuple directly) so this stays the single source of
     # truth for the map-cue -> chart-name mapping.
-    ("CaseBurdenMap", _EPIDEMIOLOGY_CUES),
+    # Epidemiology questions now go to ctsearch's OWN population map, fetched
+    # from /analytics/population and mapped by its own buildPopulationMapPoints
+    # -- the same picture the Patient Intelligence tab shows, and it honours the
+    # same country / organ / histology / biomarker / stage / line filters.
+    # CaseBurdenMap (our own map_view_population build) stays available as a
+    # named chart but is no longer what these cues select.
+    ("CancerCasesMap", _EPIDEMIOLOGY_CUES),
     ("SiteMap", (
         r"\bsite(s)?\b.*\bmap\b", r"\bmap\b.*\bsite(s)?\b", r"\bmap view\b",
         r"where\s+(are|is).*(sites?|facilit(y|ies))",
@@ -628,6 +699,55 @@ def build_fast_answer(question: str, tool_result: dict, oncosuite_ids: list,
                 {"type": "intro", "text": text},
                 {"type": "chart", "chart": analytics_chart, "props": props},
             ]
+            # Charts that fetch their own data from ctsearch's analytics API
+            # carry only the question's intent (dimension/filters), so there is
+            # nothing here to count. Answer in words and numbers FIRST -- what
+            # the data shows, then the figures behind it -- and let the chart
+            # close the answer, rather than dropping a bare chart on the reader.
+            if props.get("selfFetching"):
+                from analytics_data import filters_from_question
+                _qf = filters_from_question(question)
+                if props.get("graph") == "efficacy_vs_safety_scatter":
+                    # Endpoint COVERAGE is the story for this chart, not a
+                    # ranked dimension -- it can only plot arms reporting both
+                    # an efficacy and a safety value, which is why a sparse
+                    # scatter sits under a large cohort count.
+                    from chart_data import narrate_efficacy_safety
+                    narration = narrate_efficacy_safety(
+                        props.get("apiFilters"), _qf)
+                else:
+                    from chart_data import narrate_dimension
+                    narration = narrate_dimension(
+                        props.get("graph"), props.get("dimension"),
+                        props.get("apiFilters"),
+                        # Same filters the chart is scoped to, so the prose and
+                        # the chart describe the same slice.
+                        _qf,
+                    )
+                # Order the answer the way a person would give it: say what the
+                # data shows, show the figures, then the chart, and close with
+                # the takeaways -- so the conclusions land after the reader has
+                # seen the evidence, not before.
+                lead = [b for b in (narration or []) if b["type"] != "insights"]
+                closing = [b for b in (narration or []) if b["type"] == "insights"]
+                out = lead + out[1:] + closing
+            else:
+                # Charts that DO carry their own rows get the same shape, from
+                # the generic narrator. Without this, only the self-fetching
+                # charts read as full answers and the rest stayed a one-line
+                # intro plus a bare picture.
+                try:
+                    from chart_data import narrate_generic
+                    _gen = narrate_generic(analytics_chart, props, question)
+                except Exception:
+                    _gen = []
+                if _gen:
+                    _lead = [b for b in _gen if b["type"] != "insights"]
+                    _close = [b for b in _gen if b["type"] == "insights"]
+                    # The generic paragraph replaces the bare "Answering from
+                    # the analytics dataset: N rows" line, which said nothing
+                    # about what the data actually shows.
+                    out = _lead + out[1:] + _close
             charts = [analytics_chart]
 
             # The raw-rows table is the data BEHIND the scatter, so show the
@@ -738,6 +858,44 @@ def build_fast_answer(question: str, tool_result: dict, oncosuite_ids: list,
         if intro:
             blocks.append({"type": "intro", "text": intro})
 
+    # TRIAL COMPARISON -> its own component, not the generic HTML render. A
+    # markdown table leaves the reader diffing two columns by eye; the component
+    # highlights the differing rows, collapses the identical ones and bars the
+    # numeric gaps. Returns immediately: the generic path below would also emit
+    # a "Found N matching trial(s)" line, where N is the number of comparison
+    # FIELDS -- which is where the nonsensical "Found 16 matching trial(s)" over
+    # a two-trial comparison came from.
+    # POSTED-RESULTS CHECK -> the router already built the prose, the "what is
+    # known" detail and the next-step suggestions. Return them directly: the
+    # generic path would add a trial table and a "Found N" line, neither of which
+    # this question asked for.
+    if resp and resp.get("intent") == "posted_results_check":
+        _nb = resp.get("narration") or []
+        if _nb:
+            lead = [b for b in _nb if b["type"] != "insights"]
+            closing = [b for b in _nb if b["type"] == "insights"]
+            return {
+                "blocks": lead + closing,
+                "timings": {"select_s": 0.0,
+                            "build_s": round(time.time() - t0, 2),
+                            "total_s": round(time.time() - t0, 2)},
+                "charts": [],
+                "available": list(enabled_specs()),
+            }
+
+    if resp and resp.get("intent") == "trial_comparison":
+        _cmp = resp.get("tool_result") or {}
+        if _cmp.get("trials") and _cmp.get("rows"):
+            return {
+                "blocks": [{"type": "chart", "chart": "TrialComparison",
+                            "props": _cmp}],
+                "timings": {"select_s": 0.0,
+                            "build_s": round(time.time() - t0, 2),
+                            "total_s": round(time.time() - t0, 2)},
+                "charts": ["TrialComparison"],
+                "available": list(enabled_specs()),
+            }
+
     if resp and not same_search_recap and not map_only:
         # The router's "couldn't derive that" note is router.py's own dead-end
         # for this question -- it has no idea answer_fast's regex is about to
@@ -791,7 +949,33 @@ def build_fast_answer(question: str, tool_result: dict, oncosuite_ids: list,
     for name in names:
         props = build_chart(name, oncosuite_ids, question=question)
         if props:
+            # NARRATE THE MAP. A map shows WHERE without saying how many or how
+            # the burden compares, which is most of what an incidence question
+            # is asking. Same shape as the other charts: prose, then the figures,
+            # then the map, then the takeaways.
+            _map_narration = []
+            try:
+                if name == "CancerCasesMap":
+                    from chart_data import narrate_population
+                    _map_narration = narrate_population(
+                        props.get("country"), props.get("apiFilters"))
+                else:
+                    # EVERY chart gets the same treatment. narrate_generic works
+                    # from the SHAPE the chart already returns ({columns,data} or
+                    # {points}), so a chart with no bespoke narrator still gets
+                    # prose and takeaways instead of being a bare picture --
+                    # and returns [] when the props carry nothing worth stating.
+                    from chart_data import narrate_generic
+                    _map_narration = narrate_generic(name, props, question)
+            except Exception:
+                _map_narration = []
+            blocks.extend(
+                b for b in _map_narration if b["type"] != "insights")
+
             blocks.append({"type": "chart", "chart": name, "props": props})
+
+            # Takeaways close the answer, after the map they describe.
+            blocks.extend(b for b in _map_narration if b["type"] == "insights")
             if name == "CaseBurdenMap":
                 # Remember which countries this question named, so a later
                 # bare "show me for Hamburg" can resolve against them instead
@@ -837,3 +1021,339 @@ def build_fast_answer(question: str, tool_result: dict, oncosuite_ids: list,
         "charts": names,
         "available": list(enabled_specs()),
     }
+
+
+# ---------------------------------------------------------------------------
+# Follow-up questions.
+#
+# "top MoA" then "what about phase 2?" is one line of thought, not two
+# unrelated questions. A fragment like that names a filter but no subject, so
+# answering it alone finds nothing. Resolving it means carrying the SUBJECT
+# forward from the last real question in this session and letting the new
+# fragment override the filters it names.
+# ---------------------------------------------------------------------------
+
+# A question is treated as a follow-up when it is short AND either opens with a
+# continuation phrase or consists only of filter values. Deliberately narrow: a
+# new question that names its own subject must never be merged into the old one.
+_FOLLOWUP_OPENERS = (
+    r"^\s*(what|how)\s+about\b",
+    r"^\s*(and|but|also)\b",
+    r"^\s*(now|then)\s+(show|for|in|what)\b",
+    r"^\s*(just|only)\b",
+    r"^\s*same\b.*\b(for|in|with)\b",
+    r"^\s*(for|in|with|by)\b",          # "for phase 2", "in japan"
+    r"^\s*(that|those|it|them)\b",
+)
+
+
+def _looks_like_followup(question):
+    q = (question or "").strip()
+    if not q or len(q.split()) > 8:
+        return False
+    return any(re.search(p, q, re.IGNORECASE) for p in _FOLLOWUP_OPENERS)
+
+
+def resolve_followup(question, session_id):
+    """The question to actually answer, given this session's history.
+
+    A fragment ("what about phase 2?") is expanded with the subject of the last
+    substantive question, so it routes and filters as the user intends. Anything
+    that stands on its own is returned unchanged.
+    """
+    if not session_id or not _looks_like_followup(question):
+        return question
+    try:
+        from conversation import Conversations
+        history = Conversations().history(session_id) or []
+    except Exception:
+        return question
+
+    # The most recent user turn that was NOT itself a fragment -- that is the
+    # subject still under discussion.
+    for turn in reversed(history):
+        if turn.get("role") != "user":
+            continue
+        prev = (turn.get("content") or "").strip()
+        if not prev or _looks_like_followup(prev):
+            continue
+        # Filters named in the follow-up win; the subject comes from the prior
+        # question. Concatenating is enough because every downstream detector
+        # (chart routing, filter extraction) reads the whole string.
+        return f"{prev} {question.strip()}"
+    return question
+
+
+# ---------------------------------------------------------------------------
+# Typo tolerance.
+#
+# People mistype. "top bimoarkers", "mode of adminstration", "amendmnt risk"
+# all clearly mean something, and answering "no match" for a one-character slip
+# is the wrong behaviour. So before routing, each word of the question is
+# compared against the vocabulary this app actually understands, and a close
+# misspelling is corrected.
+#
+# Two guards keep this from doing damage:
+#   * only words of 5+ characters are considered. Short tokens collide far too
+#     easily -- "ad" scores 0.80 against "adc", "ma" against "moa" -- and a
+#     wrong correction is worse than no correction.
+#   * a high similarity floor (0.82). Real typos score 0.90+ ("bimoarkers" vs
+#     "biomarkers" = 0.90); genuinely different words score far lower
+#     ("biomarkers" vs "backbone" = 0.33), so the gap is wide and safe.
+# ---------------------------------------------------------------------------
+
+# The domain words worth correcting TO. Only terms that actually drive routing
+# or filtering -- correcting toward a word the app ignores would be noise.
+_VOCAB_TERMS = (
+    "biomarkers", "biomarker", "backbones", "backbone", "mechanism",
+    "mechanisms", "administration", "intravenous", "subcutaneous",
+    "intramuscular", "intratumoral", "competition", "competitive", "intensity",
+    "enrollment", "enrolment", "recruitment", "amendment", "amendments",
+    "duration", "efficacy", "safety", "toxicity", "feasibility", "targets",
+    "target", "modality", "classes", "strategies", "distribution", "phase",
+    "country", "countries", "trials", "trial", "arms", "cohorts", "endpoint",
+    "endpoints", "response", "protocol", "administered", "oral", "speed",
+    # Words the "do any of these have published results?" follow-up turns on --
+    # without them "publised" (0.94 similar to "published") went uncorrected and
+    # the question was not recognised at all.
+    "published", "publish", "posted", "results", "result", "outcomes",
+    "outcome", "readout", "available", "reported",
+)
+
+_MIN_FUZZY_LEN = 5
+_FUZZY_THRESHOLD = 0.82
+
+
+# Misspellings that are themselves real English words, so fuzzy matching either
+# scores them below the floor ("trail" vs "trial" = 0.80) or cannot be trusted to
+# fire at all. Listed explicitly because the intent is unambiguous in this
+# domain -- nobody asks an oncology trial database about a hiking trail.
+_REAL_WORD_CONFUSIONS = {
+    "trail": "trial",
+    "trails": "trials",
+    "tail": "trial",
+    "phas": "phase",
+    "sfaety": "safety",
+    "efficay": "efficacy",
+}
+
+
+def _build_protected_words():
+    """Every literal word that appears in a routing pattern.
+
+    Derived from the cue tables rather than listed by hand, so a word added to a
+    pattern is protected automatically instead of becoming the next
+    "cases" -> "classes" bug. Anything a detector matches on is, by definition,
+    already spelled the way this app expects.
+    """
+    import re as _re
+    sources = []
+    for _name, pats in _ANALYTICS_CUES:
+        sources.extend(pats)
+    for group in (_EPIDEMIOLOGY_CUES,):
+        sources.extend(group)
+    for _name, pats in _MAP_CUES:
+        sources.extend(pats)
+    words = set()
+    for pat in sources:
+        # Strip regex syntax, keep the plain alphabetic runs.
+        for w in _re.findall(r"[a-z]{3,}", str(pat).lower()):
+            words.add(w)
+    # Plurals/singulars of those words too: a pattern may say "case" while the
+    # question says "cases".
+    for w in list(words):
+        words.add(w + "s")
+        if w.endswith("s"):
+            words.add(w[:-1])
+    return words
+
+
+_PROTECTED_WORDS = None
+
+
+def _closest_term(word):
+    """The vocabulary term this word is a misspelling of, or None."""
+    from difflib import SequenceMatcher
+
+    global _PROTECTED_WORDS
+    if _PROTECTED_WORDS is None:
+        try:
+            _PROTECTED_WORDS = _build_protected_words()
+        except Exception:
+            _PROTECTED_WORDS = set()
+
+    lowered = word.lower()
+    if lowered in _REAL_WORD_CONFUSIONS:
+        return _REAL_WORD_CONFUSIONS[lowered]
+    # NEVER "correct" a word this app already understands. "cases" scored 0.833
+    # against "classes" -- over the threshold -- so "new cancer cases for
+    # germany" was rewritten to "new cancer classes" and the case-burden map
+    # stopped being detected. A wrong correction is worse than none, and any word
+    # that already drives routing is by definition spelled correctly.
+    if lowered in _PROTECTED_WORDS:
+        return None
+    if len(lowered) < _MIN_FUZZY_LEN or lowered in _VOCAB_TERMS:
+        return None
+    best, best_score = None, 0.0
+    for term in _VOCAB_TERMS:
+        # Length gate first: comparing "biomarkers" to "oral" is wasted work and
+        # a length mismatch of more than 2 is never a typo of this kind.
+        if abs(len(term) - len(lowered)) > 2:
+            continue
+        score = SequenceMatcher(None, lowered, term).ratio()
+        if score > best_score:
+            best, best_score = term, score
+    return best if best_score >= _FUZZY_THRESHOLD else None
+
+
+# Short domain acronyms, which the length gate above deliberately excludes --
+# fuzzy-matching 2-3 character tokens in isolation is unsafe ("ad" scores 0.80
+# against "adc", "ma" against "may"/"man"/"map"). They ARE safe to correct when
+# the surrounding words say a dimension is expected: in "top mo" or "which moa",
+# nothing else could be meant. Keyed by the word that licenses the correction.
+_DIMENSION_LEAD_INS = ("top", "which", "common", "about", "the")
+
+# The dimension words a "top ..." question can name. Read from the DB's own
+# dimension_type values plus the graph names this app routes on, so the list
+# tracks the data instead of being maintained by hand.
+_DIMENSION_TERMS_CACHE = None
+
+
+def _dimension_terms():
+    """Vocabulary for short-form correction, from the data where possible."""
+    global _DIMENSION_TERMS_CACHE
+    if _DIMENSION_TERMS_CACHE is None:
+        terms = {"moa", "backbone", "drug", "drug_class", "biomarker",
+                 "target", "mechanism", "modality", "regimen"}
+        try:
+            from db import query
+            rows = query(
+                "SELECT DISTINCT dimension_type FROM "
+                "analytics.treatment_dimension_over_time "
+                "WHERE dimension_type IS NOT NULL"
+            )
+            terms |= {r["dimension_type"] for r in rows if r["dimension_type"]}
+            rows = query(
+                "SELECT DISTINCT dimension_type FROM "
+                "analytics.biomarker_dimension_over_time "
+                "WHERE dimension_type IS NOT NULL"
+            )
+            terms |= {r["dimension_type"] for r in rows if r["dimension_type"]}
+        except Exception:
+            pass  # DB unreachable -> the built-in set still covers the routing
+        _DIMENSION_TERMS_CACHE = sorted(terms)
+    return _DIMENSION_TERMS_CACHE
+
+
+_SHORT_FORMS_CACHE = None
+
+
+def _short_forms():
+    """{typed fragment: real term} generated from the vocabulary.
+
+    Hardcoding a handful of misspellings ("mo", "ma", "bakbone") only ever
+    covered the slips someone thought of. Instead each real term generates the
+    fragments a person plausibly types:
+
+      * truncations   -- "mo", "back", "backbo"  (stopped typing early)
+      * one deletion  -- "ma" from "moa", "bakbone" from "backbone"
+
+    A fragment that could mean two different terms is DROPPED rather than
+    guessed: answering the wrong question confidently is worse than not
+    correcting. Measured against the real vocabulary, no fragment is ambiguous,
+    and the only everyday words generated ("ad", "me") are already excluded by
+    the stop-word list and the lead-in requirement in _fix_short_acronyms.
+    """
+    global _SHORT_FORMS_CACHE
+    if _SHORT_FORMS_CACHE is None:
+        owners = {}
+        for term in _dimension_terms():
+            forms = set()
+            for i in range(2, len(term)):
+                forms.add(term[:i])                      # truncation
+            for i in range(len(term)):
+                forms.add(term[:i] + term[i + 1:])       # single deletion
+            forms.add(term + "s")                        # plural
+            for f in forms:
+                if len(f) >= 2 and f != term:
+                    owners.setdefault(f, set()).add(term)
+        resolved = {}
+        for f, ts in owners.items():
+            if len(ts) == 1:
+                resolved[f] = next(iter(ts))
+                continue
+            # Ambiguous fragment. Resolve it ONLY when one candidate is a clear
+            # winner: the fragment is a truncation and one term is markedly
+            # shorter, so it is the far likelier intent ("mo" -> "moa", not
+            # "modality", because someone typing "mo" for a 8-letter word would
+            # usually have typed more). Otherwise drop it -- guessing between two
+            # real dimensions answers the wrong question confidently.
+            by_len = sorted(ts, key=len)
+            if all(t.startswith(f) for t in ts) and len(by_len[1]) - len(by_len[0]) >= 3:
+                resolved[f] = by_len[0]
+        _SHORT_FORMS_CACHE = resolved
+    return _SHORT_FORMS_CACHE
+
+# "vs" is the connector half of several chart names ("efficacy vs safety",
+# "competition intensity vs enrollment speed"), and mistyping it breaks the
+# routing regexes even when both concept words are spelled correctly --
+# "efrficacy vgs safety" corrected to "efficacy vgs safety" and then matched
+# nothing. Too short to fuzzy-match safely (2 characters: "vx" scores 0.50
+# against "vs", "is"/"as"/"us" would collide), so the variants are listed. No
+# lead-in word is required, unlike _SHORT_ACRONYMS -- "vs" can appear anywhere.
+_CONNECTOR_TYPOS = {
+    "vgs": "vs", "vss": "vs", "vsa": "vs", "vd": "vs", "vz": "vs",
+    "v/s": "vs", "vs.": "vs",
+    "versu": "versus", "verses": "versus", "verus": "versus",
+    "versos": "versus", "vursus": "versus",
+}
+
+
+def _fix_short_acronyms(question):
+    """Repair short acronyms only where the preceding word licenses it."""
+    words = re.split(r"(\W+)", question)
+    prev_word = ""
+    for i, token in enumerate(words):
+        if not token or not token.isalpha():
+            continue
+        lowered = token.lower()
+        # Connector typos need no lead-in word: "vs" is unambiguous wherever it
+        # appears, and it is what the chart-routing regexes match on.
+        connector = _CONNECTOR_TYPOS.get(lowered)
+        if connector:
+            words[i] = connector
+            prev_word = connector
+            continue
+        fixed = _short_forms().get(lowered)
+        # The lead-in is what makes this safe: "top mo" is unambiguous, a bare
+        # "mo" anywhere in a sentence is not.
+        if fixed and prev_word in _DIMENSION_LEAD_INS:
+            words[i] = fixed.upper() if token.isupper() else fixed
+        prev_word = lowered
+    return "".join(words)
+
+
+def correct_typos(question):
+    """The question with close misspellings of domain terms repaired.
+
+    Returns the input unchanged when nothing is confidently correctable, so a
+    question using words this app doesn't know is never mangled.
+    """
+    if not question:
+        return question
+    question = _fix_short_acronyms(question)
+
+    def repair(match):
+        word = match.group(0)
+        fixed = _closest_term(word)
+        if not fixed:
+            return word
+        # Preserve the writer's capitalisation so the echoed question still
+        # reads as theirs.
+        if word.isupper():
+            return fixed.upper()
+        if word[:1].isupper():
+            return fixed.capitalize()
+        return fixed
+
+    return re.sub(r"[A-Za-z]+", repair, question)

@@ -1,2 +1,0 @@
-# ctsearch
-Clinical Trial Search

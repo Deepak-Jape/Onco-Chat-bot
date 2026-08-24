@@ -27,6 +27,14 @@ DSN = os.environ.get(
 # One connection per thread (psycopg2 connections aren't thread-safe to share).
 _local = threading.local()
 
+# Separate thread-local, WRITABLE connection for frequent, latency-sensitive
+# writes (conversation turns, session working-set) -- reused per thread like
+# get_conn() below, so a chat message doesn't pay a fresh TCP+auth round-trip
+# (~1-3s over a remote DB) on every turn the way get_write_conn() would. Kept
+# apart from _local's readonly connection so a write session is never mixed
+# into the hot read path.
+_local_write = threading.local()
+
 
 def _new_conn():
     conn = psycopg2.connect(DSN)
@@ -46,6 +54,42 @@ def get_conn():
     conn = _new_conn()
     _local.conn = conn
     return conn
+
+
+def get_session_write_conn():
+    """This thread's persistent writable connection, (re)creating it if missing
+    or dead. Use for small, frequent writes (chat history, working-set state);
+    for one-off/batch writes use get_write_conn() instead."""
+    conn = getattr(_local_write, "conn", None)
+    if conn is not None and conn.closed == 0:
+        return conn
+    conn = psycopg2.connect(DSN)
+    conn.set_session(readonly=False, autocommit=True)
+    with conn.cursor() as cur:
+        cur.execute("SET search_path TO oncosuite_gold, public")
+    _local_write.conn = conn
+    return conn
+
+
+def execute(sql, params=None):
+    """Run a write statement on the shared per-thread write connection,
+    reconnecting once if it has gone stale."""
+    for attempt in (1, 2):
+        conn = get_session_write_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql, params if params else None)
+            return
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            conn2 = getattr(_local_write, "conn", None)
+            if conn2 is not None:
+                try:
+                    conn2.close()
+                except Exception:
+                    pass
+            _local_write.conn = None
+            if attempt == 2:
+                raise
 
 
 def get_write_conn():
@@ -92,3 +136,17 @@ def query(sql, params=None):
             _reset_conn()
             if attempt == 2:
                 raise
+
+
+def resolve_nct_ids(oncosuite_ids):
+    """oncosuite_id -> NCT id, for whichever ids came back from a trial/cohort
+    search. Shared by search_trials.py and search_cohorts.py so both do the
+    same clinicaltrials.gov lookup against source_mapping."""
+    if not oncosuite_ids:
+        return {}
+    rows = query(
+        "SELECT oncosuite_id, source_unique_id FROM oncosuite_gold.source_mapping "
+        "WHERE oncosuite_id = ANY(%(ids)s) AND source_name = 'clinicaltrials.gov'",
+        {"ids": list(oncosuite_ids)},
+    )
+    return {r["oncosuite_id"]: r["source_unique_id"] for r in rows}

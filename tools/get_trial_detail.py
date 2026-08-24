@@ -9,7 +9,61 @@ shortcut -- confirmed against real data, so this tool does the full join, as pla
 """
 from db import query
 
+def resolve_oncosuite_id(oncosuite_id: str):
+    """The stored id matching `oncosuite_id` ignoring case, or None.
+
+    These ids mix upper and lower case ("wD7-VqO-nZf", "kF6-oN3-If3") and are
+    read off a screen, so the case a user types is unreliable -- and some
+    characters are visually identical in common fonts: a capital I and a
+    lowercase l are indistinguishable, which is exactly how "kF6-oN3-If3" gets
+    typed as "kF6-oN3-lf3". Matching case-insensitively turns both slips into a
+    successful lookup instead of "not a trial id I recognise".
+    """
+    if not oncosuite_id:
+        return None
+    wanted = str(oncosuite_id).strip()
+    rows = query(
+        "SELECT oncosuite_id FROM oncosuite_gold.trial_info "
+        "WHERE LOWER(oncosuite_id) = LOWER(%(id)s) LIMIT 1",
+        {"id": wanted},
+    )
+    if rows:
+        return rows[0]["oncosuite_id"]
+
+    # LOOKALIKE CHARACTERS. Case alone is not enough: I/l/1 and O/0 are
+    # indistinguishable in most UI fonts, so an id copied by eye can differ from
+    # the stored one by a character that LOOKS the same. Fold those classes
+    # together and compare again -- this is what turns "kF6-oN3-lf3" (typed with
+    # a lowercase L) into the real "kF6-oN3-If3" (a capital i).
+    def _fold(value):
+        out = str(value).lower()
+        for group in ("il1", "o0", "s5", "z2"):
+            for ch in group[1:]:
+                out = out.replace(ch, group[0])
+        return out
+
+    folded = _fold(wanted)
+    # Same shape only -- 3-3-3 -- so this scans a small candidate set rather
+    # than the whole table.
+    candidates = query(
+        "SELECT oncosuite_id FROM oncosuite_gold.trial_info "
+        "WHERE oncosuite_id LIKE %(pat)s",
+        {"pat": f"{'_' * 3}-{'_' * 3}-{'_' * 3}"},
+    )
+    matches = [c["oncosuite_id"] for c in candidates
+               if _fold(c["oncosuite_id"]) == folded]
+    # Only when it is unambiguous: two ids folding to the same string means we
+    # cannot tell which was meant, and guessing shows the wrong trial.
+    return matches[0] if len(matches) == 1 else None
+
+
 def get_trial_detail(oncosuite_id: str):
+    # Normalise first: every query below matches the id exactly, so a
+    # case/lookalike slip would otherwise fail them all.
+    resolved = resolve_oncosuite_id(oncosuite_id)
+    if resolved:
+        oncosuite_id = resolved
+
     trial_rows = query(
         "SELECT oncosuite_id, official_title, trial_phase, study_status, sponsor_name, "
         "lead_organization, enrollment_count, start_date, primary_completion_date, "

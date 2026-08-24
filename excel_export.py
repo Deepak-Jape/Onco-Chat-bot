@@ -130,6 +130,13 @@ _EVIDENCE_ROW_HEIGHT = 60
 _ALWAYS_WRAP_EVIDENCE_COLUMNS = {"full_evidence", "reasoning"}
 
 
+def _write_header(ws, row, col_i, value):
+    cell = ws.cell(row=row, column=col_i, value=value)
+    cell.fill = _HEADER_FILL
+    cell.font = _HEADER_FONT
+    return cell
+
+
 def _set_value(ws, row, col, value, wrap=None):
     if wrap is None:
         wrap = isinstance(value, str) and "\n" in value
@@ -163,9 +170,7 @@ def build_xlsx(columns, rows, comments=None, evidence=None):
     ws.title = _DATA_SHEET
 
     for col_i, col in enumerate(columns, start=1):
-        cell = ws.cell(row=1, column=col_i, value=col.get("label", col["key"]))
-        cell.fill = _HEADER_FILL
-        cell.font = _HEADER_FONT
+        _write_header(ws, 1, col_i, col.get("label", col["key"]))
 
     for row_i, row in enumerate(rows):
         for col_i, col in enumerate(columns, start=1):
@@ -222,20 +227,13 @@ def _add_evidence_sheet(wb, data_ws, columns, rows, evidence):
     ev_ws = wb.create_sheet(_EVIDENCE_SHEET)
 
     for col_i, (_key, label, _width) in enumerate(_EVIDENCE_COLUMNS, start=1):
-        cell = ev_ws.cell(row=1, column=col_i, value=label)
-        cell.fill = _HEADER_FILL
-        cell.font = _HEADER_FONT
+        _write_header(ev_ws, 1, col_i, label)
     back_col = len(_EVIDENCE_COLUMNS) + 1
-    link_col = back_col + 1
-    for c, label in ((back_col, "Back to Data"), (link_col, "Source Link")):
-        cell = ev_ws.cell(row=1, column=c, value=label)
-        cell.fill = _HEADER_FILL
-        cell.font = _HEADER_FONT
+    _write_header(ev_ws, 1, back_col, "Back to Data")
 
     for col_i, (_key, _label, width) in enumerate(_EVIDENCE_COLUMNS, start=1):
         ev_ws.column_dimensions[ev_ws.cell(row=1, column=col_i).column_letter].width = width
     ev_ws.column_dimensions[ev_ws.cell(row=1, column=back_col).column_letter].width = 18
-    ev_ws.column_dimensions[ev_ws.cell(row=1, column=link_col).column_letter].width = 16
 
     # Column-key -> column-index lookup, so the hyperlink written back onto
     # the data cell lands on the exact cell the evidence came from.
@@ -281,20 +279,24 @@ def _add_evidence_sheet(wb, data_ws, columns, rows, evidence):
                 _set_value(ev_ws, next_row, 4, record.get("full_evidence"), wrap=True)
                 _set_value(ev_ws, next_row, 5, record.get("reasoning"), wrap=True)
                 ev_ws.cell(row=next_row, column=6, value=f"{conf}%" if conf is not None else None)
-                ev_ws.cell(row=next_row, column=7, value=record.get("extraction_method"))
-                ev_ws.cell(row=next_row, column=8, value=" / ".join(source_bits) or None)
+                # "Source" is a single clickable column: the label (e.g.
+                # "NCT07155187 / clinicaltrials.gov") IS the link that opens
+                # the source URL, rather than a separate plain-text label
+                # column plus a second "View Source" column pointing at the
+                # same URL.
+                source_cell = ev_ws.cell(
+                    row=next_row, column=8, value=" / ".join(source_bits) or None
+                )
+                link = record.get("source_link")
+                if link:
+                    source_cell.hyperlink = link
+                    source_cell.font = _HYPERLINK_FONT
 
                 back_cell = ev_ws.cell(
                     row=next_row, column=back_col, value=f"↩ Row {row_i + 2} · {field_label}"
                 )
                 back_cell.hyperlink = f"#'{_DATA_SHEET}'!{data_coord}"
                 back_cell.font = _HYPERLINK_FONT
-
-                link = record.get("source_link")
-                if link:
-                    link_cell = ev_ws.cell(row=next_row, column=link_col, value="View Source")
-                    link_cell.hyperlink = link
-                    link_cell.font = _HYPERLINK_FONT
 
                 # Shade every cell in this data-row's block (not just the
                 # ones with an explicit value) so the banding reads as one
@@ -306,7 +308,7 @@ def _add_evidence_sheet(wb, data_ws, columns, rows, evidence):
                 # the wrapped columns sit at the top, so the row visually
                 # splits into two misaligned halves instead of reading as
                 # one row.
-                for c in range(1, link_col + 1):
+                for c in range(1, back_col + 1):
                     cell = ev_ws.cell(row=next_row, column=c)
                     cell.fill = group_fill
                     cell.alignment = Alignment(vertical="top", wrap_text=True)
@@ -335,7 +337,7 @@ def _add_evidence_sheet(wb, data_ws, columns, rows, evidence):
         # A visible rule where this data row's block starts -- on top of the
         # alternating shade, so the boundary is unambiguous even scrolling
         # past quickly, not just on close inspection of the fill color.
-        for c in range(1, link_col + 1):
+        for c in range(1, back_col + 1):
             cell = ev_ws.cell(row=group_start_row, column=c)
             cell.border = Border(top=_GROUP_TOP_BORDER.top)
 

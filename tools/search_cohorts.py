@@ -15,8 +15,9 @@ cohorts (modality "Antibody-Drug Conjugate (ADC)"), not just literal name hits.
 """
 import re
 
-from db import query
-from tools.search_trials import _expand_synonyms
+from column_catalog import COHORT_COLUMNS, extra_keys_with, resolve_keys
+from db import query, resolve_nct_ids
+from tools.search_trials import drug_match_predicate, expand_and_pattern
 
 # The ONLY hardcoded entries allowed here: acronyms/aliases whose expansion does
 # NOT literally appear in the data, so no amount of matching against DB values
@@ -123,16 +124,6 @@ def extract_drug_class(text):
             hit = w
     return [hit] if hit else None
 
-# The drug-match columns, same widened set search_trials uses so class/modality
-# queries (ADC, bispecific, checkpoint) resolve correctly.
-_DRUG_COLS = ["name", "target", "brand_name", "modality", "class",
-              "moa_category", "mechanism_of_action"]
-
-
-def _drug_predicate(param):
-    ors = " OR ".join(f"d.{c} ILIKE ANY(%({param})s)" for c in _DRUG_COLS)
-    return f"({ors})"
-
 
 def _clean_list(val):
     """cohort jsonb-array columns come back as a Python list (or None). Join the
@@ -154,29 +145,78 @@ def _indication(row):
     return " ".join(parts) or "Not specified"
 
 
+def _fmt_dosage(value, unit):
+    if value is None:
+        return None
+    num = f"{value:g}" if isinstance(value, float) else str(value)
+    return f"{num} {unit}".strip() if unit else num
+
+
+def regimen_drug_details(cohort_ids):
+    """Per-drug treatment detail for each cohort's regimen -- dosage, schedule,
+    duration, treatment status and route -- straight from oncosuite_gold.treatment_info,
+    joined the SAME way (arms_info -> stratification_info -> treatment_info) the
+    regimen string above is built, so drug names line up exactly with what's
+    displayed. Returns {cohort_id: {drug_name: {...}}}; a drug with more than one
+    treatment_info row in a cohort (e.g. two arms dosing it differently) keeps the
+    first (lowest treatment_id) -- the regimen cell shows one name, not one per arm."""
+    if not cohort_ids:
+        return {}
+    rows = query(
+        "SELECT a.cohort_id, tr.drug_name, tr.dosage_value, tr.dosage_unit, "
+        "tr.schedule, tr.duration, tr.treatment_status, tr.mode_of_administration "
+        "FROM oncosuite_gold.arms_info a "
+        "JOIN oncosuite_gold.stratification_info s ON s.arm_id = a.arm_id "
+        "JOIN oncosuite_gold.treatment_info tr ON tr.strata_id = s.strata_id "
+        "WHERE a.cohort_id = ANY(%(ids)s) AND tr.drug_name IS NOT NULL "
+        "ORDER BY a.cohort_id, tr.drug_name, tr.treatment_id",
+        {"ids": list(set(cohort_ids))},
+    )
+    out = {}
+    for r in rows:
+        bucket = out.setdefault(r["cohort_id"], {})
+        name = str(r["drug_name"]).strip()
+        if name in bucket:
+            continue
+        route = r.get("mode_of_administration")
+        if isinstance(route, list):
+            route = ", ".join(str(x) for x in route if x) or None
+        bucket[name] = {
+            "dosage": _fmt_dosage(r.get("dosage_value"), r.get("dosage_unit")),
+            "schedule": r.get("schedule"),
+            "duration": r.get("duration"),
+            "treatment_status": r.get("treatment_status"),
+            "mode_of_administration": route,
+        }
+    return out
+
+
 def search_cohorts(drug_name_or_target=None, condition=None, biomarkers=None,
                    line_of_therapy=None, phase=None, study_status=None,
-                   limit=200, offset=0):
+                   limit=200, offset=0, columns=None):
     """Return cohort-level rows for the given filters. Currently supports the
     filters the spec needs (drug/class, condition, biomarker, line, phase,
     status); extend as needed. Returns:
         {"results": [...], "total_cohorts": n, "total_trials": m, "returned": k}
-    Each result: oncosuite_id, indication, regimen, phase, status, cohort_id.
+    Each result: oncosuite_id, indication, regimen, phase, status, cohort_id,
+    plus any extra column_catalog.COHORT_COLUMNS keys requested via `columns`
+    (see resolve_keys) -- None/[] reproduces exactly today's row shape.
     """
+    active_keys = resolve_keys(COHORT_COLUMNS, columns)
+    extra_cohort_cols = extra_keys_with(COHORT_COLUMNS, active_keys, "cohort_col")
+    extra_drug_cols = extra_keys_with(COHORT_COLUMNS, active_keys, "drug_col")
+
     where = ["1=1"]
     params = {"limit": limit, "offset": offset}
 
     if drug_name_or_target:
-        expanded = []
-        for d in drug_name_or_target:
-            expanded.extend(_expand_synonyms(d))
-        params["drug"] = [f"%{d}%" for d in expanded]
+        params["drug"] = expand_and_pattern(drug_name_or_target)
         where.append(
             "EXISTS (SELECT 1 FROM oncosuite_gold.arms_info a2 "
             "JOIN oncosuite_gold.stratification_info s2 ON s2.arm_id = a2.arm_id "
             "JOIN oncosuite_gold.treatment_info tr2 ON tr2.strata_id = s2.strata_id "
             "JOIN oncosuite_gold.drug_info d ON d.drug_id = tr2.drug_id "
-            f"WHERE a2.cohort_id = c.cohort_id AND {_drug_predicate('drug')})"
+            f"WHERE a2.cohort_id = c.cohort_id AND {drug_match_predicate('d', 'drug')})"
         )
     if phase:
         where.append("c.phase = ANY(%(phase)s)")
@@ -204,6 +244,18 @@ def search_cohorts(drug_name_or_target=None, condition=None, biomarkers=None,
 
     where_sql = " AND ".join(where)
 
+    extra_cohort_select = "".join(f", c.{COHORT_COLUMNS[k]['cohort_col']}" for k in extra_cohort_cols)
+    extra_drug_select = "".join(
+        f""",
+               (SELECT string_agg(DISTINCT d.{COHORT_COLUMNS[k]['drug_col']}, ' + ')
+                  FROM oncosuite_gold.arms_info a
+                  JOIN oncosuite_gold.stratification_info s ON s.arm_id = a.arm_id
+                  JOIN oncosuite_gold.treatment_info tr ON tr.strata_id = s.strata_id
+                  JOIN oncosuite_gold.drug_info d ON d.drug_id = tr.drug_id
+                 WHERE a.cohort_id = c.cohort_id
+                   AND d.{COHORT_COLUMNS[k]['drug_col']} IS NOT NULL) AS {k}"""
+        for k in extra_drug_cols
+    )
     rows = query(f"""
         SELECT c.cohort_id, c.oncosuite_id, c.line_of_therapy, c.biomarkers,
                c.histology, c.organ, c.phase, t.study_status,
@@ -213,6 +265,7 @@ def search_cohorts(drug_name_or_target=None, condition=None, biomarkers=None,
                   JOIN oncosuite_gold.treatment_info tr ON tr.strata_id = s.strata_id
                   JOIN oncosuite_gold.drug_info d ON d.drug_id = tr.drug_id
                  WHERE a.cohort_id = c.cohort_id AND d.name IS NOT NULL) AS regimen
+               {extra_cohort_select}{extra_drug_select}
         FROM oncosuite_gold.cohort_info c
         JOIN oncosuite_gold.trial_info t ON t.oncosuite_id = c.oncosuite_id
         WHERE {where_sql}
@@ -230,14 +283,17 @@ def search_cohorts(drug_name_or_target=None, condition=None, biomarkers=None,
 
     # map oncosuite_id -> NCT id for display/linking
     ids = list({r["oncosuite_id"] for r in rows})
-    nct_map = {}
-    if ids:
-        for r in query(
-            "SELECT oncosuite_id, source_unique_id FROM oncosuite_gold.source_mapping "
-            "WHERE oncosuite_id = ANY(%(ids)s) AND source_name='clinicaltrials.gov'",
-            {"ids": ids},
-        ):
-            nct_map[r["oncosuite_id"]] = r["source_unique_id"]
+    nct_map = resolve_nct_ids(ids)
+    regimen_details = regimen_drug_details([r["cohort_id"] for r in rows])
+
+    def _extra_fields(r):
+        out = {}
+        for k in extra_cohort_cols:
+            v = r.get(COHORT_COLUMNS[k]["cohort_col"])
+            out[k] = _clean_list(v) if COHORT_COLUMNS[k].get("is_list") else v
+        for k in extra_drug_cols:
+            out[k] = r.get(k) or "Not specified"
+        return out
 
     results = [{
         "cohort_id": r["cohort_id"],
@@ -245,12 +301,15 @@ def search_cohorts(drug_name_or_target=None, condition=None, biomarkers=None,
         "nct_id": nct_map.get(r["oncosuite_id"]),
         "indication": _indication(r),
         "regimen": r["regimen"] or "Not specified",
+        "regimen_detail": regimen_details.get(r["cohort_id"], {}),
         "phase": r["phase"] or (r.get("study_status") and "") or "—",
         "status": r["study_status"] or "—",
+        **_extra_fields(r),
     } for r in rows]
 
     return {
         "results": results,
+        "columns": active_keys,
         "total_cohorts": totals["total_cohorts"],
         "total_trials": totals["total_trials"],
         "returned": len(results),

@@ -49,6 +49,154 @@ def _country_iso2(name):
     return _ISO2.get(_country_code(name) or "")
 
 
+_FILTER_VOCAB_CACHE = None
+
+# The jsonb-array filter columns, and the request key each maps to in ctsearch's
+# feasibility API (see normalizeFeasibilityAnalyticsFilters in
+# src/api/analytics/feasibility.js). `country` is handled separately -- it is a
+# scalar column, and the API spells its request key `countries`.
+_FILTER_COLUMNS = {
+    "phase": "phases",
+    "line_of_therapy": "line_intent",
+    "cancer_stage": "stage",
+}
+
+
+def filter_vocabulary():
+    """{column: [distinct values]} for the filter columns, read from the DB.
+
+    The vocabulary is the DATA's own, not a hardcoded list: users can phrase a
+    question any way they like, and the only reliable way to know that "phase 2"
+    means the value "Phase 2" -- or that "2L+" is a real line of therapy -- is to
+    compare against what the column actually contains. It also means new values
+    become filterable without a code change.
+    """
+    global _FILTER_VOCAB_CACHE
+    if _FILTER_VOCAB_CACHE is None:
+        vocab = {}
+        try:
+            with get_conn() as conn, conn.cursor() as cur:
+                for col in _FILTER_COLUMNS:
+                    cur.execute(
+                        "SELECT DISTINCT jsonb_array_elements_text(%s) "
+                        "FROM analytics.competitionintensity_graph"
+                        % col  # column name, not a value -- from our own dict
+                    )
+                    vocab[col] = sorted(
+                        (r[0] for r in cur.fetchall()
+                         if r[0] and r[0] != "Not Specified"),
+                        key=len, reverse=True,
+                    )
+        except Exception:
+            vocab = {col: [] for col in _FILTER_COLUMNS}
+        _FILTER_VOCAB_CACHE = vocab
+    return _FILTER_VOCAB_CACHE
+
+
+_BIOMARKER_VOCAB_CACHE = None
+
+
+def biomarker_vocabulary():
+    """{"biomarker": [...], "target": [...], "mode": [...]} from the DB.
+
+    Same principle as filter_vocabulary(): the values users type ("EGFR",
+    "intravenous") are only recognisable by comparing against what the data
+    actually holds, and new values then work without a code change.
+    """
+    global _BIOMARKER_VOCAB_CACHE
+    if _BIOMARKER_VOCAB_CACHE is None:
+        vocab = {"biomarker": [], "target": [], "mode": []}
+        try:
+            with get_conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT DISTINCT dimension_type, dimension_value "
+                    "FROM analytics.biomarker_dimension_over_time "
+                    "WHERE dimension_value IS NOT NULL"
+                )
+                for dim_type, value in cur.fetchall():
+                    if dim_type in vocab and value:
+                        vocab[dim_type].append(value)
+                cur.execute(
+                    "SELECT DISTINCT mode_of_admin "
+                    "FROM analytics.mode_of_administration_over_time "
+                    "WHERE mode_of_admin IS NOT NULL"
+                )
+                vocab["mode"] = [r[0] for r in cur.fetchall() if r[0]]
+        except Exception:
+            pass
+        # Longest first so "FGFR3" wins over "FGFR" and "Intravenous (IV)" over
+        # a bare "IV".
+        _BIOMARKER_VOCAB_CACHE = {
+            k: sorted(set(v), key=len, reverse=True) for k, v in vocab.items()
+        }
+    return _BIOMARKER_VOCAB_CACHE
+
+
+def biomarkers_from_question(question):
+    """({"biomarker"|"target"|"mode": [values]}) named in the question.
+
+    Matched against the real vocabulary. A biomarker's own bracketed form is
+    also matched loosely, so "HER2" finds "HER2 (ERBB2)" and "intravenous"
+    finds "Intravenous (IV)".
+    """
+    q = str(question or "")
+    found = {}
+    for kind, values in biomarker_vocabulary().items():
+        hits = []
+        for value in values:
+            # Match either the whole value or just its leading token, so the
+            # parenthesised code is optional in the question ("HER2" finds
+            # "HER2 (ERBB2)"), and the code alone works too ("IV", "PO").
+            head = re.split(r"\s*\(", value)[0].strip()
+            code = None
+            m = re.search(r"\(([^)]*)\)", value)
+            if m and re.fullmatch(r"[A-Za-z-]{2,6}", m.group(1).strip()):
+                code = m.group(1).strip()
+            for candidate in (value, head, code):
+                if not candidate:
+                    continue
+                pattern = r"\s*".join(
+                    re.escape(part) for part in candidate.split()
+                )
+                if re.search(rf"(?<!\w){pattern}(?!\w)", q, re.IGNORECASE):
+                    hits.append(value)
+                    break
+        if hits:
+            # Keep only the most specific matches: an exact hit on "EGFR" should
+            # not also drag in every "EGFR (…)" variant that shares its prefix.
+            shortest = min(len(h) for h in hits)
+            found[kind] = sorted(h for h in hits if len(h) == shortest)
+    return found
+
+
+def filters_from_question(question):
+    """Filters named in a question, as {column: [values]}.
+
+    Matches the question against each column's real vocabulary, longest value
+    first so "Phase 2/3" wins over "Phase 2" and "2L+" over "2L". Values whose
+    own punctuation would otherwise be lost ("2L+", "Advanced / Metastatic") are
+    matched with whitespace treated flexibly rather than literally.
+    """
+    q = str(question or "")
+    found = {}
+    for col, values in filter_vocabulary().items():
+        hits = []
+        for value in values:
+            # Escape the value, then let any run of whitespace in it match any
+            # run in the question ("advanced/metastatic" vs "Advanced /
+            # Metastatic"). Trailing "+" is part of the token, so the closing
+            # boundary is "not a word char" ra  ther than \b, which would fail
+            # after "+".
+            pattern = r"\s*".join(re.escape(part) for part in value.split())
+            if re.search(rf"(?<!\w){pattern}(?!\w)", q, re.IGNORECASE):
+                hits.append(value)
+        if hits:
+            # Longest match only: "Phase 2/3" should not also report "Phase 2".
+            best = hits[0]
+            found[col] = [v for v in hits if v == best or v not in best]
+    return found
+
+
 def _scope(alias, oncosuite_ids, where=None, params=None):
     """Shared WHERE builder: optionally restrict a query to a set of trials.
 
@@ -90,13 +238,17 @@ def _population(v):
 def _first(v):
     """First value of a list-ish column.
 
-    These views store such columns either as a real jsonb array or as text like
-    "['Phase 2']", so both shapes are handled.
+    These views store such columns as a real jsonb array, as jsonb-array text
+    like "['Phase 2']", OR (efficacyvssafety_table's line_of_therapy/cancer_stage/
+    phase/country, native postgres ARRAY columns of an unregistered element
+    type) as postgres's own array literal text, e.g. '{"Phase 2"}' -- psycopg2
+    has no typecaster for that element type, so it comes back as the raw
+    driver text rather than a Python list. All three shapes are handled here.
     """
     if isinstance(v, list):
         return str(v[0]).strip() if v else None
     s = str(v or "").strip()
-    if s.startswith("[") and s.endswith("]"):
+    if (s.startswith("[") and s.endswith("]")) or (s.startswith("{") and s.endswith("}")):
         s = s[1:-1]
     return s.replace('"', "").replace("'", "").split(",")[0].strip() or None
 
@@ -104,6 +256,26 @@ def _first(v):
 # --------------------------------------------------------------------------
 # Efficacy vs Safety
 # --------------------------------------------------------------------------
+# Safety-side metrics the chart's `sae` point field (and its y-axis option
+# list) may draw from, in priority order. Kept as ONE shared list so the
+# y-axis options offered and the field actually populated below never drift
+# apart -- whichever of these wins as the default is guaranteed to be the one
+# reflected in `sae`, so "N plotted" never claims points the chart then
+# renders as empty (see NewTreatment.jsx's EfficacyVsSafety, vendored/
+# unmodified, which always plots the literal `orr`/`sae` fields regardless of
+# its own dropdowns). All five are genuine safety/toxicity measures -- DLT for
+# dose-escalation designs, TEAE more broadly -- just labelled differently by
+# trial design; excluded on purpose are this table's combined/ambiguous
+# labels ("TEAES, TESAES", "OR, CR, PR", ...) from its extraction pipeline,
+# which never match any single metric and are correctly left out rather than
+# guessed at.
+_SAFETY_METRICS = ("SAE", "AE", "AES", "DLT", "TEAE")
+
+
+def _safety_value(metrics):
+    return next((metrics[m] for m in _SAFETY_METRICS if m in metrics), None)
+
+
 # The efficacyvssafety_* family is the same measurements grouped a different
 # way -- one table per "Color by" dimension. Each is keyed by oncosuite_id and
 # carries endpoint_abbr / endpoint_value plus its own grouping column, so the
@@ -150,17 +322,35 @@ EFFICACY_DIMENSIONS = {
 def _filters(alias, filters):
     """Optional line_of_therapy / phase / cancer_stage / country narrowing.
 
-    These columns are jsonb arrays in the analytics views, so membership is
-    tested with the containment operator rather than equality.
+    line_of_therapy / phase / cancer_stage are jsonb arrays in the analytics
+    views, so membership is tested with the containment operator.
+
+    `country` is NOT one of them -- it is a scalar column holding the display
+    form "United States ( USA )". Containment (`?|`) against it fails outright,
+    which silently returned no rows for any country-scoped query. It is matched
+    on the NAME PREFIX instead, so a caller can pass either the bare name or the
+    full "Name ( CODE )" string.
     """
     where, params = [], []
-    for key in ("line_of_therapy", "phase", "cancer_stage", "country"):
+    for key in ("line_of_therapy", "phase", "cancer_stage"):
         value = (filters or {}).get(key)
         if not value:
             continue
         values = value if isinstance(value, list) else [value]
         where.append(f"{alias}.{key} ?| %s")
         params.append(list(values))
+
+    country = (filters or {}).get("country")
+    if country:
+        names = country if isinstance(country, list) else [country]
+        # One ILIKE per requested country, OR-ed: "Italy" matches
+        # "Italy ( ITA )" without needing the caller to know the code.
+        clauses = []
+        for name in names:
+            clauses.append(f"{alias}.country::text ILIKE %s")
+            params.append(f"{str(name).split('(')[0].strip()}%")
+        where.append("(" + " OR ".join(clauses) + ")")
+
     return where, params
 
 
@@ -197,13 +387,26 @@ def build_competition_vs_enrollment(oncosuite_ids=None, filters=None, limit=2000
     if not rows:
         return None
 
+    # `code` and `size` are what ctsearch's quadrant chart reads: `code` is the
+    # ISO alpha-2 it renders as the bubble's flag, `size` drives the bubble
+    # radius. Without them every bubble is a same-sized blank circle, so keep
+    # both in sync with FeasibilityQuadrantChart's point shape. Trial count
+    # drives the size -- this chart is about competition, so a bigger bubble
+    # reads as a busier country.
     points = [
         {
             "name": _clean_country(country),
+            # The unmodified DB spelling, "United States ( USA )". ctsearch's
+            # feasibility API matches the country EXACTLY in this form -- the
+            # bare name returns zero points -- so filter requests must send this
+            # back rather than the stripped display name.
+            "countryRaw": country,
+            "code": _country_iso2(country),
             "x": round(float(intensity), 4),
             "y": round(float(speed), 3),
             "trials": int(trials or 0),
             "planned": int(planned or 0),
+            "size": int(trials or 0),
         }
         for country, intensity, speed, trials, planned in rows
     ]
@@ -348,8 +551,9 @@ def build_efficacy_safety_rows(oncosuite_ids=None, limit=1000):
     sql = f"""
         SELECT x.arm_id, x.oncosuite_id, x.arm_type, x.treatment_strategy,
                x.endpoint_category, x.endpoint_abbreviation, x.endpoint_value,
-               x.phase::text, x.year
+               f.phase::text, x.year
           FROM analytics.efficacy_vs_safety x
+          LEFT JOIN analytics.filters_table f ON f.arm_id = x.arm_id
           {clause}
          ORDER BY x.arm_id, x.endpoint_abbreviation
          LIMIT %s
@@ -414,11 +618,12 @@ def build_efficacy_safety_wide(oncosuite_ids=None, limit=5000):
                MIN(x.oncosuite_id)        AS oncosuite_id,
                MIN(x.treatment_strategy)  AS strategy,
                MIN(x.arm_type)            AS arm_type,
-               MIN(x.phase::text)         AS phase,
+               MIN(f.phase::text)         AS phase,
                MIN(x.year)                AS year,
                UPPER(x.endpoint_abbreviation) AS metric,
                MAX(x.endpoint_value)      AS value
           FROM analytics.efficacy_vs_safety x
+          LEFT JOIN analytics.filters_table f ON f.arm_id = x.arm_id
           {clause}
          GROUP BY x.arm_id, UPPER(x.endpoint_abbreviation)
          LIMIT %s
@@ -447,7 +652,7 @@ def build_efficacy_safety_wide(oncosuite_ids=None, limit=5000):
             "name": str(arm_id),
             "metrics": info["metrics"],
             "orr": info["metrics"].get("ORR"),
-            "sae": info["metrics"].get("AE") or info["metrics"].get("SAE"),
+            "sae": _safety_value(info["metrics"]),
             "n": 1,
             "strategy": info["strategy"],
             "biomarker": info["phase"],
@@ -470,8 +675,15 @@ def build_efficacy_safety_wide(oncosuite_ids=None, limit=5000):
                    if p["metrics"].get(x) is not None
                    and p["metrics"].get(y) is not None)
 
-    x_all = ["ORR", "DCR", "DOR", "DCB", "PCR", "TTR", "SD", "PFS", "OS"]
-    y_all = ["AE", "SAE", "AES", "DLT", "TEAE"]
+    # The chart component this feeds (NewTreatment.jsx's EfficacyVsSafety,
+    # vendored/unmodified) always plots the literal `orr`/`sae` point fields --
+    # its axis dropdowns are cosmetic and never re-key the plotted data. Only
+    # ORR populates `orr` and only SAE/AE/AES populate `sae` (see the point
+    # construction above), so those are the only metrics that can ever be
+    # offered as a default: picking e.g. DLT here would report "N plotted"
+    # while the chart actually renders nothing for any of them.
+    x_all = ["ORR"]
+    y_all = list(_SAFETY_METRICS)
     x_options = [m for m in x_all if _have(m) >= 3]
     y_options = [m for m in y_all if _have(m) >= 3]
     if not x_options or not y_options:
@@ -549,7 +761,7 @@ def build_efficacy_safety_by_dimension(dimension="backbone", oncosuite_ids=None,
             "name": f"{oid} · {grp}",
             "metrics": info["metrics"],
             "orr": info["metrics"].get("ORR"),
-            "sae": info["metrics"].get("SAE") or info["metrics"].get("AE"),
+            "sae": _safety_value(info["metrics"]),
             "n": int(info["n"] or 1) or 1,
             # Every grouping key is mirrored onto `strategy` so the chart's
             # default "Color by" field groups correctly whichever table is used.
@@ -576,8 +788,13 @@ def build_efficacy_safety_by_dimension(dimension="backbone", oncosuite_ids=None,
     # Requiring a metric to PAIR with the other axis hid ORR-only units, which
     # are still worth plotting -- the chart shows them against whichever axis
     # they do have.
-    x_all = ["ORR", "DCR", "DOR", "DCB", "PCR", "TTR", "SD", "PFS", "OS"]
-    y_all = ["SAE", "AE", "AES", "DLT", "TEAE"]
+    # Restricted to what the chart's fixed `orr`/`sae` point fields actually
+    # carry (see the point construction above) -- NewTreatment.jsx's
+    # EfficacyVsSafety (vendored, unmodified) always plots those two literal
+    # fields, so a default of e.g. DLT would report points as "plotted" while
+    # rendering nothing.
+    x_all = ["ORR"]
+    y_all = list(_SAFETY_METRICS)
     x_options = [x for x in x_all if _have(x) >= 3]
     y_options = [y for y in y_all if _have(y) >= 3]
     if not x_options or not y_options:
@@ -635,11 +852,13 @@ def build_efficacy_safety(oncosuite_ids=None, limit=400):
                MIN(e.oncosuite_id) AS oncosuite_id,
                MIN(e.treatment_strategy) AS strategy,
                MIN(e.arm_type) AS arm_type,
-               -- phase is jsonb in these views, so cast before aggregating.
-               MIN(e.phase::text) AS phase,
+               -- phase isn't on efficacy_vs_safety itself; filters_table carries
+               -- it (jsonb array) keyed by the same arm_id.
+               MIN(f.phase::text) AS phase,
                UPPER(e.endpoint_abbreviation) AS metric,
                MAX(e.endpoint_value) AS value
           FROM analytics.efficacy_vs_safety e
+          LEFT JOIN analytics.filters_table f ON f.arm_id = e.arm_id
           {clause}
          GROUP BY e.arm_id, UPPER(e.endpoint_abbreviation)
          LIMIT %s
@@ -676,19 +895,17 @@ def build_efficacy_safety(oncosuite_ids=None, limit=400):
             # biomarker_dimension_over_time and treatment_dimension_over_time
             # each hold several dimensions in one table, keyed by
             # dimension_type: biomarker/target and drug/moa/drug_class/backbone.
+            # arm_id is a plain int column here (one row per arm), not a jsonb
+            # array, so this is a direct membership filter, no unnesting.
             for table in ("biomarker_dimension_over_time",
                           "treatment_dimension_over_time"):
                 cur.execute(
                     f"""
-                    SELECT d.dimension_type,
-                           (a.value)::int AS arm_id,
-                           MIN(d.dimension_value) AS v
+                    SELECT d.dimension_type, d.arm_id, MIN(d.dimension_value) AS v
                       FROM analytics.{table} d
-                      CROSS JOIN LATERAL
-                           jsonb_array_elements_text(d.arm_ids) AS a(value)
                      WHERE d.dimension_value IS NOT NULL
                        AND d.dimension_type IS NOT NULL
-                       AND (a.value)::int = ANY(%s)
+                       AND d.arm_id = ANY(%s)
                      GROUP BY 1, 2
                     """,
                     (arm_ids,),
@@ -698,11 +915,10 @@ def build_efficacy_safety(oncosuite_ids=None, limit=400):
 
             cur.execute(
                 """
-                SELECT (a.value)::int AS arm_id, MIN(m.mode_of_admin) AS v
+                SELECT m.arm_id, MIN(m.mode_of_admin) AS v
                   FROM analytics.mode_of_administration_over_time m
-                  CROSS JOIN LATERAL jsonb_array_elements_text(m.arm_ids) AS a(value)
                  WHERE m.mode_of_admin IS NOT NULL
-                   AND (a.value)::int = ANY(%s)
+                   AND m.arm_id = ANY(%s)
                  GROUP BY 1
                 """,
                 (arm_ids,),
@@ -721,7 +937,7 @@ def build_efficacy_safety(oncosuite_ids=None, limit=400):
             # endpoint this arm has so the axis dropdowns can re-plot without a
             # round-trip.
             "orr": metrics.get("ORR"),
-            "sae": metrics.get("SAE") or metrics.get("AE") or metrics.get("AES"),
+            "sae": _safety_value(metrics),
             "metrics": metrics,
             "n": 1,
             "strategy": meta["strategy"] or "Unknown",
@@ -750,8 +966,11 @@ def build_efficacy_safety(oncosuite_ids=None, limit=400):
                 out.append(m)
         return out
 
-    x_options = _available(["ORR", "DCR", "DOR", "TTR", "SD", "PFS", "OS"])
-    y_options = _available(["SAE", "AE", "AES", "DLT", "TEAE"])
+    # Restricted to ORR/SAE-family: the chart's `orr`/`sae` point fields (set
+    # above) are the only ones NewTreatment.jsx's EfficacyVsSafety (vendored,
+    # unmodified) ever plots, regardless of which metric is "selected" here.
+    x_options = _available(["ORR"])
+    y_options = _available(_SAFETY_METRICS)
     if not x_options or not y_options:
         return None
 
@@ -1058,7 +1277,7 @@ def build_efficacy_safety_extracted(oncosuite_ids=None, limit=1000):
             "name": info["arm_name"] or info["oncosuite_id"],
             "metrics": info["metrics"],
             "orr": info["metrics"].get("ORR"),
-            "sae": info["metrics"].get("SAE") or info["metrics"].get("AE"),
+            "sae": _safety_value(info["metrics"]),
             "n": 1,
             "strategy": info["strategy"],
             "biomarker": info["phase"],
@@ -1080,8 +1299,14 @@ def build_efficacy_safety_extracted(oncosuite_ids=None, limit=1000):
         return sum(1 for p in points
                    if p["metrics"].get(x) is not None and p["metrics"].get(y) is not None)
 
-    x_options = [m for m in _EXTRACTED_X if _have(m) >= 3]
-    y_options = [m for m in _EXTRACTED_Y if _have(m) >= 3]
+    # _EXTRACTED_X/_EXTRACTED_Y widen the SQL fetch to every metric worth
+    # carrying in `metrics` for the tooltip, but the chart itself (NewTreatment
+    # .jsx's EfficacyVsSafety, vendored/unmodified) only ever plots the literal
+    # `orr`/`sae` point fields set above -- so only ORR/SAE-family may be
+    # offered as the default axis, or "N plotted" would claim points that
+    # never actually render (e.g. DLT, which has no `sae`-field mapping).
+    x_options = [m for m in _EXTRACTED_X if m == "ORR" and _have(m) >= 3]
+    y_options = [m for m in _EXTRACTED_Y if m in _SAFETY_METRICS and _have(m) >= 3]
     if not x_options or not y_options:
         return None
 
@@ -1105,3 +1330,337 @@ def build_efficacy_safety_extracted(oncosuite_ids=None, limit=1000):
             {"label": "Color by Phase", "field": "phase"},
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Narrative facts for the phase-bar dimension charts.
+#
+# The charts themselves fetch from ctsearch's analytics API, so these queries
+# exist to ANSWER THE QUESTION IN WORDS as well: a reader asking "what are the
+# top MoA" wants the ranking and the shape of it, not just a picture to
+# interpret. Everything below is read from the same analytics views the charts
+# are built from, so the prose can never contradict the chart.
+# ---------------------------------------------------------------------------
+
+# graph key -> (table, value column, optional dimension_type filter column)
+_DIMENSION_SOURCES = {
+    "treatment_dimension": ("treatment_dimension_over_time",
+                            "dimension_value", "dimension_type"),
+    "biomarker_dimension": ("biomarker_dimension_over_time",
+                            "dimension_value", "dimension_type"),
+    "mode_of_administration": ("mode_of_administration_over_time",
+                               "mode_of_admin", None),
+}
+
+
+_TABLE_COLS_CACHE = {}
+
+
+def _table_columns(table, schema="analytics"):
+    """Column names of one table, cached. Empty set if it doesn't exist."""
+    key = (schema, table)
+    if key not in _TABLE_COLS_CACHE:
+        try:
+            with get_conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = %s AND table_name = %s",
+                    (schema, table),
+                )
+                _TABLE_COLS_CACHE[key] = {r[0] for r in cur.fetchall()}
+        except Exception:
+            _TABLE_COLS_CACHE[key] = set()
+    return _TABLE_COLS_CACHE[key]
+
+
+def dimension_facts(graph, dimension=None, filters=None, limit=8,
+                    arm_type=None):
+    """Ranked totals, phase split and trend for one dimension chart.
+
+    Returns {"rows": [{name, arms, phases: {phase: n}}], "total": n,
+             "years": (first, last), "trend": {name: {year: n}}} or None.
+
+    `arm_type` ("Control" | "Experimental") must match what the CHART is scoped
+    to. Without it the prose counted every arm while the chart showed only the
+    control ones -- 1,962 in the text against 163 in the picture.
+    """
+    source = _DIMENSION_SOURCES.get(graph)
+    if not source:
+        return None
+    table, value_col, type_col = source
+
+    # These tables differ between environments: some carry phase / arm_count /
+    # the filter columns inline, others are one row per ARM with phase and the
+    # filters living in analytics.filters_table. Detect which, rather than
+    # assuming -- the inline form silently failed with "column t.phase does not
+    # exist" and the narration was dropped.
+    cols = _table_columns(table)
+    if not cols:
+        return None
+    has_inline_phase = "phase" in cols
+    has_arm_count = "arm_count" in cols
+    join_filters = not has_inline_phase and "arm_id" in cols
+
+    alias = "t" if has_inline_phase else "f"
+    where, params = [f"t.{value_col} IS NOT NULL"], []
+    if type_col and dimension:
+        where.append(f"t.{type_col} = %s")
+        params.append(dimension)
+    # Scope to the same arm type the chart is showing, so the prose and the
+    # chart cannot disagree about the totals.
+    if arm_type and "arm_type" in cols:
+        where.append("t.arm_type = %s")
+        params.append(arm_type)
+    # Filters read from whichever relation actually holds those columns.
+    if has_inline_phase or join_filters:
+        extra, extra_params = _filters(alias, filters)
+        where += extra
+        params += extra_params
+    clause = "WHERE " + " AND ".join(where)
+
+    phase_expr = "t.phase::text" if has_inline_phase else (
+        "f.phase::text" if join_filters else "NULL::text")
+    arms_expr = "SUM(t.arm_count)" if has_arm_count else "COUNT(DISTINCT t.arm_id)"
+    join_sql = (
+        "LEFT JOIN analytics.filters_table f ON f.arm_id = t.arm_id"
+        if join_filters else ""
+    )
+
+    sql = f"""
+        SELECT t.{value_col} AS name,
+               {phase_expr}  AS phase,
+               t.year        AS year,
+               {arms_expr}   AS arms
+          FROM analytics.{table} t
+          {join_sql}
+          {clause}
+         GROUP BY t.{value_col}, {phase_expr}, t.year
+    """
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
+            raw = cur.fetchall()
+    except Exception:
+        return None
+    if not raw:
+        return None
+
+    totals, phases, trend = {}, {}, {}
+    years = set()
+    for name, phase, year, arms in raw:
+        n = int(arms or 0)
+        totals[name] = totals.get(name, 0) + n
+        # phase arrives as a jsonb array string ('["Phase 2"]'); the label is
+        # the only part that matters here.
+        label = re.sub(r'[\[\]"]', "", str(phase or "")).strip() or "Not Specified"
+        phases.setdefault(name, {})
+        phases[name][label] = phases[name].get(label, 0) + n
+        if year:
+            years.add(int(year))
+            trend.setdefault(name, {})
+            trend[name][int(year)] = trend[name].get(int(year), 0) + n
+
+    ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:limit]
+
+    # Derived per-category signals. These are the things a stacked bar chart
+    # CANNOT show, and are the whole point of the takeaways: how far each
+    # category has progressed through development, and whether it is growing.
+    #   late_share -- fraction of arms in Phase 3/4. A high share means the
+    #                 category is converting to confirmatory trials; a near-zero
+    #                 share means it is stuck early however many arms it has.
+    #   recent_share -- fraction of arms from the last three years of data,
+    #                 which separates emerging categories from legacy volume.
+    recent_cutoff = (max(years) - 2) if years else None
+    late, recent = {}, {}
+    for name, phase, year, arms in raw:
+        n = int(arms or 0)
+        label = re.sub(r'[\[\]"]', "", str(phase or ""))
+        if "Phase 3" in label or "Phase 4" in label:
+            late[name] = late.get(name, 0) + n
+        if recent_cutoff and year and int(year) >= recent_cutoff:
+            recent[name] = recent.get(name, 0) + n
+
+    rows = []
+    for name, arms in ranked:
+        rows.append({
+            "name": name,
+            "arms": arms,
+            "phases": phases.get(name, {}),
+            "late": late.get(name, 0),
+            "late_share": (late.get(name, 0) / arms) if arms else 0.0,
+            "recent": recent.get(name, 0),
+            "recent_share": (recent.get(name, 0) / arms) if arms else 0.0,
+        })
+
+    return {
+        "rows": rows,
+        "total": sum(totals.values()),
+        "distinct": len(totals),
+        "years": (min(years), max(years)) if years else None,
+        "recent_cutoff": recent_cutoff,
+        "trend": {name: trend.get(name, {}) for name, _ in ranked},
+    }
+
+
+def efficacy_safety_facts(filters=None, arm_type=None, limit=10):
+    """Endpoint coverage behind the Efficacy vs Safety scatter.
+
+    The chart can only plot an arm that reports BOTH an efficacy and a safety
+    endpoint, so the useful facts are: which endpoints are reported at all, how
+    many arms carry each, and -- the number that actually explains the chart --
+    how many arms carry a plottable PAIR.
+
+    Returns {"rows": [{name, category, arms, avg}], "arms": n, "plottable": n,
+             "efficacy": [...], "safety": [...]} or None.
+    """
+    where = ["e.endpoint_abbreviation IS NOT NULL",
+             "e.endpoint_value BETWEEN 0 AND 100",
+             "LOWER(e.endpoint_abbreviation) <> 'unknown'"]
+    params = []
+    if arm_type:
+        where.append("e.arm_type = %s")
+        params.append(arm_type)
+    extra, extra_params = _filters("e", filters)
+    where += extra
+    params += extra_params
+    clause = "WHERE " + " AND ".join(where)
+
+    sql = f"""
+        SELECT e.endpoint_abbreviation      AS name,
+               MIN(e.endpoint_category)     AS category,
+               COUNT(DISTINCT e.arm_id)     AS arms,
+               ROUND(AVG(e.endpoint_value)::numeric, 1) AS avg_val
+          FROM analytics.efficacy_vs_safety e
+          {clause}
+         GROUP BY e.endpoint_abbreviation
+         ORDER BY arms DESC
+    """
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+    except Exception:
+        return None
+    if not rows:
+        return None
+
+    efficacy, safety = [], []
+    out = []
+    for name, category, arms, avg_val in rows:
+        cat = str(category or "")
+        bucket = efficacy if "efficacy" in cat.lower() else (
+            safety if "safety" in cat.lower() else None)
+        if bucket is not None:
+            bucket.append(name)
+        out.append({"name": name, "category": cat, "arms": int(arms or 0),
+                    "avg": float(avg_val) if avg_val is not None else None})
+
+    # Arms carrying a plottable PAIR -- the count the chart's badge reflects, and
+    # the one a reader needs to interpret an apparently sparse scatter.
+    pair_sql = f"""
+        SELECT COUNT(*) FROM (
+            SELECT e.arm_id
+              FROM analytics.efficacy_vs_safety e
+              {clause}
+             GROUP BY e.arm_id
+            HAVING BOOL_OR(e.endpoint_category ILIKE '%%efficacy%%')
+               AND BOOL_OR(e.endpoint_category ILIKE '%%safety%%')
+        ) paired
+    """
+    plottable = None
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(pair_sql, tuple(params))
+            plottable = int(cur.fetchone()[0] or 0)
+    except Exception:
+        pass
+
+    total_arms = None
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT COUNT(DISTINCT e.arm_id) FROM analytics.efficacy_vs_safety e {clause}",
+                tuple(params))
+            total_arms = int(cur.fetchone()[0] or 0)
+    except Exception:
+        pass
+
+    return {"rows": out[:limit], "arms": total_arms, "plottable": plottable,
+            "efficacy": efficacy, "safety": safety}
+
+
+def population_facts(country=None, limit=8):
+    """Population / case-burden facts behind the new-cancer-cases map.
+
+    CAREFUL WITH annual_cases: it is a COUNTRY-level figure repeated on every
+    city row, so summing it is meaningless (Germany's 57,000 became 692,265,000
+    across 12,145 rows). It is read with MIN/MAX per country instead, and the
+    per-city numbers come from city_population and case_ratio.
+
+    Returns {"country", "population", "annual_cases", "cities",
+             "top_cities": [...], "countries": [...]} or None.
+    """
+    where, params = ["m.annual_cases IS NOT NULL"], []
+    if country:
+        where.append("m.country ILIKE %s")
+        params.append(f"{country}%")
+    clause = "WHERE " + " AND ".join(where)
+
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            if country:
+                cur.execute(
+                    f"""SELECT MIN(m.country)::text            AS country,
+                               MAX(m.country_population)       AS population,
+                               MAX(m.annual_cases)             AS annual_cases,
+                               COUNT(*)                        AS cities
+                          FROM oncosuite_gold.map_view_population m
+                          {clause}""",
+                    tuple(params),
+                )
+                head = cur.fetchone()
+                if not head or not head[0]:
+                    return None
+                cur.execute(
+                    f"""SELECT m.city, m.city_population, m.case_ratio,
+                               m.city_area_km2
+                          FROM oncosuite_gold.map_view_population m
+                          {clause} AND m.city_population IS NOT NULL
+                         ORDER BY m.city_population DESC
+                         LIMIT %s""",
+                    tuple(params) + (limit,),
+                )
+                cities = [
+                    {"city": c, "population": int(p or 0),
+                     "case_ratio": float(r) if r is not None else None,
+                     "area": float(a) if a is not None else None}
+                    for c, p, r, a in cur.fetchall()
+                ]
+                return {"country": head[0], "population": int(head[1] or 0),
+                        "annual_cases": int(head[2] or 0),
+                        "cities": int(head[3] or 0), "top_cities": cities,
+                        "countries": []}
+
+            # No country named -> compare countries against each other.
+            cur.execute(
+                f"""SELECT m.country::text AS country,
+                           MAX(m.country_population) AS population,
+                           MAX(m.annual_cases)       AS annual_cases
+                      FROM oncosuite_gold.map_view_population m
+                      {clause}
+                     GROUP BY m.country
+                     ORDER BY annual_cases DESC NULLS LAST
+                     LIMIT %s""",
+                tuple(params) + (limit,),
+            )
+            rows = [
+                {"country": c, "population": int(p or 0),
+                 "annual_cases": int(a or 0)}
+                for c, p, a in cur.fetchall()
+            ]
+            if not rows:
+                return None
+            return {"country": None, "population": None, "annual_cases": None,
+                    "cities": None, "top_cities": [], "countries": rows}
+    except Exception:
+        return None

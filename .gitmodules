@@ -1,4 +1,0 @@
-[submodule "vendor/ctsearch"]
-	path = vendor/ctsearch
-	url = https://github.com/Scalient-AI-Solutions-Pvt-Ltd/ctsearch.git
-	branch = deepak_work

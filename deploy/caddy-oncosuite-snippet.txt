@@ -1,0 +1,32 @@
+Caddy route to add for OncoSuite, HTTPS UAT site.
+
+The VM's real Caddyfile already has this exact block on the plain-HTTP site
+(204.168.157.213) and on thinkaiindia.com. It is MISSING on the HTTPS UAT site
+(204.168.157.213.sslip.io) -- add it there too, since ctsearch's .env now
+points at that HTTPS host (integration moved off the plain-HTTP test site).
+
+Do not touch anything else in that site block (HRMS, /user/, /search/,
+/analytics/, /site_intelligence/ routes stay exactly as they are).
+
+Add this block inside the `204.168.157.213.sslip.io { ... }` site, alongside
+its other `handle_path` / `handle` blocks (before the final catch-all `handle {
+root * /srv_uat ... }` block, same as on the plain-HTTP site):
+
+    # OncoSuite chatbot: app is base-path aware (ONCOSUITE_BASE_PATH=/chat-bot),
+    # forward full path unchanged.
+    handle /chat-bot* {
+        reverse_proxy oncosuite:8014
+    }
+
+After adding, validate and reload:
+    caddy validate --config /path/to/Caddyfile
+    sudo systemctl reload caddy   # or however Caddy is run on this VM
+
+Then confirm:
+    curl -s https://204.168.157.213.sslip.io/chat-bot/api/health
+    # -> {"status":"ok","service":"oncosuite"}
+
+Requires the `oncosuite` container (docker-compose.yml in this repo) to be
+running and joined to the same `app-network` Caddy itself is attached to --
+Caddy reaches it by container name (`oncosuite:8014`), not a published host
+port, same as `ct_prod`, `list_endpoints`, `analytics_endpoints`, etc.
