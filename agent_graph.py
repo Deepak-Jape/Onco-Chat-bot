@@ -134,7 +134,9 @@ class AgentState(TypedDict):
 
 
 _SYSTEM = """You are a clinical-trials research agent. Answer the user's question by
-calling the available TOOLS one at a time, reasoning over each result, until you can
+calling the available TO
+
+OLS one at a time, reasoning over each result, until you can
 give a final grounded answer. You may only use these tools:
 
 {tools}

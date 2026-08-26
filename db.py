@@ -21,7 +21,7 @@ import psycopg2.extras
 
 DSN = os.environ.get(
     "ONCOSUITE_DSN",
-    "host=127.0.0.1 dbname=oncosuite_new user=postgres password=Deepak@2309",
+    "host=204.168.157.213 port=5432 dbname=chatbot user=postgres password=Somya",
 )
 
 # One connection per thread (psycopg2 connections aren't thread-safe to share).
@@ -150,3 +150,4 @@ def resolve_nct_ids(oncosuite_ids):
         {"ids": list(oncosuite_ids)},
     )
     return {r["oncosuite_id"]: r["source_unique_id"] for r in rows}
+

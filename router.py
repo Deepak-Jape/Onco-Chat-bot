@@ -817,12 +817,6 @@ def _render_trial_page(results, total, filters, columns=None):
     header = f"**Every matching trial{scope}: {total} total**"
     from column_catalog import trial_markdown_table
     keys = list(columns or [])
-    # "reported_outcomes" only exists when the search was filtered by
-    # search_trials' reported_outcomes param (e.g. "have OS/ORR/PFS reported")
-    # -- shown as its own column so it's visible WHICH of the requested
-    # metrics each row actually has, not just that the search was narrowed.
-    if any(r.get("reported_outcomes") for r in results) and "reported_outcomes" not in keys:
-        keys.append("reported_outcomes")
     lines = [header, ""] + trial_markdown_table(results, keys)
     lines.append("")
     lines.append(f"_All {total} matching trial(s)._")
@@ -1041,7 +1035,9 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
 
     classification = classify_and_extract(user_message, working_set)
     intent = classification["intent"]
-    _step(f"Classified your question as a {intent.replace('_', ' ')}")
+    _intent_label = intent.replace('_', ' ')
+    _step(f"Classified your question as {_intent_label}" if intent == "out_of_scope"
+          else f"Classified your question as a {_intent_label}")
 
     # LEARNING -- REPLAY (filters). The classifier is an LLM call and is
     # non-deterministic: the same question can come back with filters one turn

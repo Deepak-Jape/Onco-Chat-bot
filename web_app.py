@@ -2557,6 +2557,34 @@ class Handler(BaseHTTPRequestHandler):
                     resp = handle_turn(session_id, q,
                                        on_step=lambda m: steps.put(("step", m)),
                                        skip_synthesis=True)
+
+                    # A genuine out-of-scope result -- the classifier said
+                    # out_of_scope and neither the SQL/vector fallback nor
+                    # general knowledge could rescue it -- has no data behind
+                    # it. Pulling trial data, building insights and picking a
+                    # chart from an empty tool_result would only manufacture a
+                    # data-backed-looking answer directly under a note saying
+                    # there isn't one, so stop here instead of falling into
+                    # build_fast_answer's chart-selection pipeline.
+                    if resp.get("response_mode") == "out_of_scope_policy_needed":
+                        steps.put(("step", "Not able to answer — out of scope"))
+                        from chart_data import enabled_specs
+                        result["payload"] = {
+                            "blocks": [{
+                                "type": "intro",
+                                "text": (
+                                    (resp.get("note") or "That question is out of scope.")
+                                    + "\n\nI can answer questions about the lung cancer "
+                                      "trial database -- trials, sponsors, phases, drugs, "
+                                      "endpoints, and related analytics."
+                                ),
+                            }],
+                            "timings": {"select_s": 0.0, "build_s": 0.0, "total_s": 0.0},
+                            "charts": [],
+                            "available": list(enabled_specs()),
+                        }
+                        return
+
                     ids = _answer_trial_ids(resp)
                     steps.put(("step", "Choosing the best visualisation"))
                     result["payload"] = build_fast_answer(

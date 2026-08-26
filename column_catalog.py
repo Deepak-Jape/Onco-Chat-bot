@@ -100,10 +100,14 @@ def extra_keys_with(catalog, active_keys, field_name):
 def label_for(catalog, key):
     """Display label for a column key. Falls back to a titleized version of the
     key itself for fields the caller adds outside the catalog (e.g. search_trials'
-    conditional "reported_outcomes" column), so an unrecognized key still renders
-    a readable header instead of raising."""
+    per-metric "ORR"/"OS"/"PFS" columns when a search was scoped by
+    reported_outcomes), so an unrecognized key still renders a readable header
+    instead of raising. An all-caps key is left as-is rather than titleized --
+    "ORR".title() produces the wrong-looking "Orr"."""
     meta = catalog.get(key)
-    return meta["label"] if meta else key.replace("_", " ").title()
+    if meta:
+        return meta["label"]
+    return key if key.isupper() else key.replace("_", " ").title()
 
 
 def labels_for(catalog, keys):

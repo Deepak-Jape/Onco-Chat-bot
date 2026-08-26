@@ -200,6 +200,10 @@ def _academic_exclusion_sql(param_key):
     return f"(t.sponsor_name ILIKE ANY(%({param_key})s))"
 
 
+def _txt(v) -> str:
+    return "" if v is None else str(v).strip()
+
+
 def _classify_sponsor(name):
     """Same heuristic as get_competitive_landscape.py's _classify_sponsor -- there is
     no authoritative sponsor-type column, so this backs the opt-in "sponsor_type"
@@ -224,6 +228,11 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
     value for ANY of these metrics in results_outcomes_basic_info. Without this,
     "trials that have OS/ORR/PFS reported" has no way to be expressed and silently
     gets dropped, returning the same unfiltered set as a bare condition search.
+    Each requested metric also becomes its own result column (e.g. "ORR", "OS"),
+    carrying the actual reported value(s) rather than just a yes/no flag -- so
+    "Phase 3 trials with ORR and OS" gets real figures, not just which trials
+    have them. A trial with several arms joins each arm's value with "; "; a
+    trial with none of a given metric gets None in that column.
 
     columns: extra column_catalog.TRIAL_COLUMNS keys to include ON TOP OF the
     default row shape (see resolve_keys) -- e.g. ["lead_organization", "sponsor_type"]
@@ -352,15 +361,21 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
     ids = [r["oncosuite_id"] for r in rows]
     nct_map = resolve_nct_ids(ids)
 
-    # When reported_outcomes filtered the search, show WHICH of those metrics
-    # each trial actually has -- the filter alone doesn't say why a given row
-    # qualified, and a trial can have some but not all of the requested metrics.
-    reported_map = {}
+    # When reported_outcomes filtered the search, surface the ACTUAL reported
+    # value for each requested metric as its own column (e.g. "ORR", "OS") --
+    # not just a flag of which metrics exist. A trial can carry the metric on
+    # several arms with different values, so each trial's cell joins every
+    # arm's value rather than picking one arbitrarily; a trial with none of a
+    # given metric simply gets None in that column (same "genuinely missing"
+    # convention as elsewhere -- see dashboard.py), so the caller can tell a
+    # column-with-no-value apart from a column-that-doesn't-exist.
+    values_by_id = {}
+    metric_order = [m.upper() for m in reported_outcomes] if reported_outcomes else []
     if reported_outcomes and ids:
-        metric_order = [m.upper() for m in reported_outcomes]
         metric_rows = query(
             """
-            SELECT c4.oncosuite_id, UPPER(e4.endpoint_abbreviation) AS metric
+            SELECT c4.oncosuite_id, UPPER(e4.endpoint_abbreviation) AS metric,
+                   a4.arm_name, r4.value, r4.value_and_evaluator
               FROM oncosuite_gold.cohort_info c4
               JOIN oncosuite_gold.arms_info a4 ON a4.cohort_id = c4.cohort_id
               JOIN oncosuite_gold.results_outcomes_basic_info r4 ON r4.arm_id = a4.arm_id
@@ -368,16 +383,26 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
              WHERE c4.oncosuite_id = ANY(%(ids)s)
                AND UPPER(e4.endpoint_abbreviation) = ANY(%(metrics)s)
                AND r4.value IS NOT NULL
-             GROUP BY c4.oncosuite_id, UPPER(e4.endpoint_abbreviation)
+             ORDER BY c4.oncosuite_id, metric, a4.arm_name
             """,
             {"ids": ids, "metrics": metric_order},
         )
-        found_by_id = {}
         for r in metric_rows:
-            found_by_id.setdefault(r["oncosuite_id"], set()).add(r["metric"])
-        reported_map = {
-            oid: ", ".join(m for m in metric_order if m in metrics)
-            for oid, metrics in found_by_id.items()
+            # value is the best-effort parsed number; value_and_evaluator is the
+            # free-text fallback when parsing found nothing -- same precedence
+            # chart_data.build_endpoints_table already uses for this same table.
+            val = _txt(r.get("value")) or _txt(r.get("value_and_evaluator"))
+            if not val:
+                continue
+            arm = _txt(r.get("arm_name"))
+            formatted = f"{val} ({arm})" if arm else val
+            per_metric = values_by_id.setdefault(r["oncosuite_id"], {})
+            seen = per_metric.setdefault(r["metric"], [])
+            if formatted not in seen:  # a trial can list the same arm's value twice via joins
+                seen.append(formatted)
+        values_by_id = {
+            oid: {m: "; ".join(vals) for m, vals in metrics.items()}
+            for oid, metrics in values_by_id.items()
         }
 
     def _extra_fields(r):
@@ -401,7 +426,7 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
             "sponsor": r["sponsor_name"],
             "enrollment": r["enrollment_count"],
             "start_date": str(r["start_date"]) if r["start_date"] else None,
-            **({"reported_outcomes": reported_map.get(r["oncosuite_id"], "")}
+            **({m: values_by_id.get(r["oncosuite_id"], {}).get(m) for m in metric_order}
                if reported_outcomes else {}),
             **_extra_fields(r),
         }
@@ -410,7 +435,7 @@ def search_trials(condition=None, biomarkers=None, cancer_stage=None, line_of_th
 
     return {
         "results": results,
-        "columns": active_keys + (["reported_outcomes"] if reported_outcomes else []),
+        "columns": active_keys + metric_order,
         "total_matches": total,
         "returned": len(results),
         "unmatched_terms": unmatched_terms,
