@@ -1243,6 +1243,14 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
         r"\bdiffer(ence|ences|s)?\b.*\bbetween\b",
         r"\band how\b.*\b(differ|compare)\b",
         r"\bacross\b.*\b(phases?|countries|countr|sponsors?|lines?|stages?)\b",
+        # Decision/recommendation phrasing that names two options with "or" and
+        # no other chaining cue -- "1L or 2L", "phase 2 or phase 3", "which is
+        # better, EGFR or KRAS" -- still needs one search per option plus a
+        # reasoned pick, exactly like the "vs" shape above, just phrased as a
+        # choice instead of an explicit comparison verb.
+        r"\b(which|what|should i|is it better to|better to)\b.*\bor\b",
+        r"\b\w+\s+or\s+\w+\b.*\b(better|best|worth|should i|recommend)\b",
+        r"\b(better|best)\b.*\b(to run|for (a |my )?trial|option|choice)\b",
     )
     _is_comparative = any(re.search(p, _lm) for p in _COMPARATIVE_PATTERNS)
 
@@ -1253,11 +1261,28 @@ def handle_turn(session_id: str, user_message: str, on_step=None,
         or sum(1 for v in _ACTION_VERBS if v in _lm) >= 2
         or _is_comparative
     )
+    import os as _os
+    if _os.environ.get("AGENT_DEBUG"):
+        print(f"[router] _is_multistep={_is_multistep} _is_comparative={_is_comparative} "
+              f"for: {user_message!r}")
     if _is_multistep:
         try:
             import agent_graph
             ag = agent_graph.run_agent(user_message)
-        except Exception:
+            if _os.environ.get("AGENT_DEBUG"):
+                print(f"[router] run_agent returned: "
+                      f"{'None' if ag is None else ag.get('response_mode')}")
+        except Exception as _e:
+            # This bare except was silently discarding real failures (LLM
+            # timeout, rate limit, etc.) from a multi-step run that had
+            # already done real work -- surfaced them as a plain "out of
+            # scope" with no trace of what happened. Always log so a live
+            # failure is diagnosable instead of indistinguishable from "the
+            # agent legitimately had nothing to say".
+            import os, traceback
+            if os.environ.get("AGENT_DEBUG"):
+                print(f"[router] agent_graph.run_agent raised: {type(_e).__name__}: {_e}")
+                traceback.print_exc()
             ag = None
         if ag is not None:
             return ag

@@ -1245,6 +1245,12 @@ def render_markdown_lite(md: str) -> str:
             out.append(f"<p class='muted'>{_inline_md(s.strip('_'))}</p>")
         elif len(s) >= 3 and set(s) <= set("-*_"):
             out.append('<hr class="synth-hr">')
+        elif s.lower().startswith(("excluded from", "excluded:", "note:", "caveat:")):
+            # A transparency aside about what the analysis left out ("Excluded
+            # from the 1L analysis: NCT... (limited-stage SCLC, not NSCLC 1L)")
+            # reads as more analysis unless it's visually set apart -- see
+            # p.exclusion-note in the stylesheet.
+            out.append(f"<p class='exclusion-note'>{_inline_md(s)}</p>")
         elif s:
             out.append(f"<p>{_inline_md(s)}</p>")
     flush_table()
@@ -1453,11 +1459,18 @@ def render_cohort_list(syn: dict) -> str:
 def render_synthesis(synthesis: dict) -> str:
     if not synthesis or not synthesis.get("text"):
         return ""
-    mode = synthesis.get("mode")
-    mode_label = "LLM-generated" if mode == "llm" else "computed directly from verified data, no LLM"
+    # No "LLM-generated" / "computed directly" label -- that's an internal
+    # implementation detail (which code path produced the text), not
+    # something a reader needs to judge the analysis by; every fact in it is
+    # already grounded in tool observations regardless of which mode wrote it.
     return (
-        '<div class="card" style="border-color:#2563eb;border-width:2px">'
-        f'<div class="tag">Analysis \u2014 {esc(mode_label)}</div>'
+        '<div class="card synth-card">'
+        '<div class="synth-badge">'
+        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">'
+        '<path d="M8 1.5 9.6 5.7 14 7l-4.4 1.3L8 12.5 6.4 8.3 2 7l4.4-1.3L8 1.5Z" '
+        'fill="currentColor"/></svg>'
+        '<span>Analysis</span>'
+        '</div>'
         f'<div class="synth-body">{render_markdown_lite(synthesis["text"])}</div>'
         '</div>'
     )
@@ -1886,7 +1899,23 @@ PAGE = """<!doctype html>
              border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer; width: 100%; }
  .nextstep:hover { background: #e2edff; }
  .data-table tr:hover td { background: #f7f9fc; }
- .synth-h { font-size: 13px; color: #2563eb; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
+ /* The comparative/agentic answer card (render_synthesis) -- a heavy flat
+    2px blue border read as an alert/warning box rather than "here is a
+    thorough, trustworthy analysis". A soft tinted header band + a thin
+    accent border keeps it feeling premium and calm instead of urgent, using
+    only colors already established elsewhere in this file (#2563eb accent,
+    #eef1f6 hairlines, #f7f9fc/#eff4ff tints). */
+ .synth-card { border-color: #dbe6fb; padding: 0; overflow: hidden; }
+ .synth-badge { display: flex; align-items: center; gap: 7px; padding: 12px 18px;
+                background: linear-gradient(180deg, #f5f9ff 0%, #eff4ff 100%);
+                border-bottom: 1px solid #dbe6fb; color: #2563eb;
+                font-size: 12px; font-weight: 650; text-transform: uppercase;
+                letter-spacing: .04em; }
+ .synth-badge svg { flex-shrink: 0; }
+ .synth-card .synth-body { padding: 18px; }
+ .synth-h { font-size: 13px; color: #2563eb; margin: 20px 0 8px; text-transform: uppercase;
+            letter-spacing: .04em; font-weight: 700; padding-top: 14px; border-top: 1px solid #f2f4f8; }
+ .synth-body > .synth-h:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
  .synth-body { font-size: 14.5px; color: #1f2937; }
  .synth-body p { margin: 8px 0; line-height: 1.62; }
  .synth-body p:first-child { margin-top: 0; }
@@ -1895,6 +1924,20 @@ PAGE = """<!doctype html>
  .synth-body ul { margin: 8px 0; padding-left: 22px; }
  .synth-body li { margin: 4px 0; line-height: 1.55; }
  .synth-hr { border: 0; border-top: 1px solid #eef1f6; margin: 14px 0; }
+ /* Comparison / breakdown tables read as reference material, not prose, so
+    they get a sticky header (long tables scroll a LOT vertically in a chat
+    bubble) and zebra striping for horizontal scan-ability across many
+    columns (Trial / Sponsor / Phase / Status / Enrollment / Notes). */
+ .synth-body .table-wrap { max-height: 420px; overflow-y: auto; }
+ .synth-body .data-table thead th { position: sticky; top: 0; z-index: 1;
+                                     box-shadow: 0 1px 0 #eef1f6; }
+ .synth-body .data-table tbody tr:nth-child(even) td { background: #fafbfd; }
+ .synth-body .data-table tbody tr:hover td { background: #f2f6ff; }
+ /* "Excluded from the 1L analysis: ..." caption lines -- currently a bare
+    paragraph, easy to misread as more analysis rather than a transparency
+    note about what was left out. Muted + a left rule reads as an aside. */
+ .synth-body p.exclusion-note { font-size: 12.5px; color: #6b7280; margin: 4px 0 14px;
+                  padding: 6px 0 6px 10px; border-left: 2px solid #e5e9f0; }
  .trial-chip { display:inline-block; background:#eff4ff; color:#2563eb; border:1px solid #d5e2fb;
                border-radius:6px; padding:1px 7px; margin:1px 3px 1px 0; font-size:12px;
                cursor:pointer; white-space:nowrap; }
